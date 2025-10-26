@@ -5,6 +5,49 @@
    let droneDevice = null;
    let audioContext = null;
    let magentaModel = null;
+   let mqttClient = null;
+
+   function setupMQTT() {
+      mqttClient = mqtt.connect("ws://localhost:9001");
+
+      mqttClient.on("connect", () => {
+         console.log("MQTT Connected");
+         mqttClient.subscribe("switch/trigger");
+         mqttClient.subscribe("switch/regenerate");
+      });
+
+      mqttClient.on("message", (topic, message) => {
+         const msg = message.toString();
+         console.log(`${topic}: ${msg}`);
+
+         if (topic === "switch/trigger") {
+            const [row, col] = msg.split(",").map(Number);
+            // Trigger from p5 instance
+            if (window.p5Instance) {
+               window.p5Instance.triggerFromMQTT(row, col);
+            }
+         }
+
+         if (topic === "switch/regenerate") {
+            regenerateMelody();
+         }
+      });
+   }
+
+   function publishState(row, col, state, note) {
+      if (mqttClient?.connected) {
+         mqttClient.publish(
+            "switch/state",
+            JSON.stringify({
+               row,
+               col,
+               state,
+               note,
+               timestamp: Date.now(),
+            }),
+         );
+      }
+   }
 
    async function setupRNBO() {
       const WAContext = window.AudioContext || window.webkitAudioContext;
@@ -242,6 +285,12 @@
             .map(() => Math.floor(Math.random() * 37) + 48);
       }
    }
+   async function regenerateMelody() {
+      const newNotes = await generateMelody(16);
+      if (window.p5Instance) {
+         window.p5Instance.updateNotes(newNotes);
+      }
+   }
 
    onMount(() => {
       setupRNBO();
@@ -263,6 +312,23 @@
          "https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js";
 
       script.onload = () => {
+         const p5Instance = new window.p5((p) => {
+            window.p5Instance = {
+         triggerFromMQTT: (row, col) => {
+            if (row >= 0 && row < rows && col >= 0 && col < cols) {
+               triggerRipple(row, col, !ellipseStates[row][col]);
+            }
+         },
+         updateNotes: (newNotes) => {
+            let idx = 0;
+            for (let i = 0; i < rows; i++) {
+               for (let j = 0; j < cols; j++) {
+                  midiNotes[i][j] = newNotes[idx++] || 60;
+               }
+            }
+            console.log('Notes updated via MQTT');
+         }
+      };
          new window.p5((p) => {
             const canvasSize = 720;
             const rows = 4;
@@ -323,6 +389,7 @@
                const clickedX = xSpacing * (clickedCol + 1);
                const clickedY = ySpacing * (clickedRow + 1);
                let ellipsesWithDistance = [];
+               publishState(clickedRow, clickedCol, newState, midiNotes[clickedRow][clickedCol]);
 
                for (let i = 0; i < cols; i++) {
                   for (let j = 0; j < rows; j++) {
@@ -377,12 +444,29 @@
 </script>
 
 <style>
+   :global(html),
    :global(body) {
       margin: 0;
+      padding: 0;
+      overflow: hidden; /* ← Add this */
+      width: 100vw;
+      height: 100vh;
+   }
+
+   :global(body) {
       display: flex;
       justify-content: center;
       align-items: center;
-      min-height: 100vh;
       background: #f0f0f0;
+   }
+
+   /* Hide all scrollbars */
+   :global(*) {
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+   }
+
+   :global(*::-webkit-scrollbar) {
+      display: none;
    }
 </style>
