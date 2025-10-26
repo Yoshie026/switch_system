@@ -1,0 +1,388 @@
+<script>
+   import { onMount } from "svelte";
+
+   let mainSynth = null;
+   let droneDevice = null;
+   let audioContext = null;
+   let magentaModel = null;
+
+   async function setupRNBO() {
+      const WAContext = window.AudioContext || window.webkitAudioContext;
+      audioContext = new WAContext();
+
+      const mainGain = audioContext.createGain();
+      const droneGain = audioContext.createGain();
+      const masterGain = audioContext.createGain();
+
+      mainGain.gain.value = 0.7;
+      droneGain.gain.value = 0.3;
+
+      mainGain.connect(masterGain);
+      droneGain.connect(masterGain);
+      masterGain.connect(audioContext.destination);
+
+      try {
+         const synthResponse = await fetch("/export/synth.export.json");
+         const droneResponse = await fetch("/export/drone.export.json");
+
+         if (!synthResponse.ok)
+            throw new Error(`Synth load failed: ${synthResponse.status}`);
+         if (!droneResponse.ok)
+            throw new Error(`Drone load failed: ${droneResponse.status}`);
+
+         const synthPatcher = await synthResponse.json();
+         const dronePatcher = await droneResponse.json();
+
+         if (!window.RNBO) {
+            await loadRNBOScript(synthPatcher.desc.meta.rnboversion);
+         }
+
+         mainSynth = await window.RNBO.createDevice({
+            context: audioContext,
+            patcher: synthPatcher,
+         });
+
+         droneDevice = await window.RNBO.createDevice({
+            context: audioContext,
+            patcher: dronePatcher,
+         });
+
+         mainSynth.node.connect(mainGain);
+         droneDevice.node.connect(droneGain);
+
+         console.log("Both RNBO devices loaded");
+
+         setupMainSynth();
+         setupDrone();
+      } catch (err) {
+         console.error("RNBO setup failed:", err);
+      }
+   }
+
+   function setupDrone() {
+      if (!droneDevice) return;
+
+      try {
+         // activate droneOn when the page loads
+         const droneOnParam = droneDevice.parametersById.get("droneOn");
+         if (droneOnParam) {
+            droneOnParam.value = 1;
+            console.log("🎛️ droneOn = 1");
+         }
+
+         // send note + velocity directly via notein equivalent (MIDIEvent)
+         const midiPort = 0;
+         const note = 48; // C2 or whatever root you want
+         const velocity = 100;
+         const currentTime = droneDevice.context.currentTime * 1000;
+
+         const noteOn = [144, note, velocity];
+         const noteOff = [128, note, 0];
+
+         droneDevice.scheduleEvent(
+            new window.RNBO.MIDIEvent(currentTime, midiPort, noteOn),
+         );
+
+         console.log("🎵 Drone started via notein");
+
+         // Optionally, keep the drone sustained (no noteOff)
+         // Uncomment below if you want a fixed length instead of continuous:
+         /*
+      droneDevice.scheduleEvent(
+         new window.RNBO.MIDIEvent(currentTime + 2000, midiPort, noteOff)
+      );
+      */
+      } catch (err) {
+         console.error("Drone setup error:", err);
+      }
+   }
+
+   function loadRNBOScript(version) {
+      return new Promise((resolve, reject) => {
+         const el = document.createElement("script");
+         el.src = `https://c74-public.nyc3.digitaloceanspaces.com/rnbo/${encodeURIComponent(version)}/rnbo.min.js`;
+         el.onload = resolve;
+         el.onerror = () => reject(new Error("Failed to load rnbo.js"));
+         document.body.append(el);
+      });
+   }
+
+   function setupMainSynth() {
+      if (!mainSynth) return;
+
+      // Set main synth sound preset
+      const params = {
+         filterCut: 1000,
+         filterQ: 0.1,
+         reverbTime: 3,
+         reverbMix: 0.5,
+         filterType: 2,
+         "poly/envelope/attack": 200,
+         "poly/envelope/decay": 200,
+         "poly/envelope/sustain": 0,
+         "poly/envelope/release": 1000,
+         "poly/oscillator/mode": 0,
+         "poly/envelope/release": 1000,
+         "poly/delay/fb": 0.75,
+         "poly/delay/fb": 0.75,
+      };
+
+      Object.entries(params).forEach(([key, value]) => {
+         const param = mainSynth.parametersById.get(key);
+         if (param) {
+            param.value = value;
+            console.log(`Main synth: ${key} = ${value}`);
+         }
+      });
+   }
+
+   // function setupDrone() {
+   //    if (!droneDevice) return;
+
+   //    try {
+   //       // Set drone parameters (adjust these based on your drone patch)
+   //       const droneParams = {
+   //          droneOn: 1,
+   //          droneNote: 48,
+   //          droneVelocity: 100,
+   //       };
+
+   //       Object.entries(droneParams).forEach(([key, value]) => {
+   //          const param = droneDevice.parametersById.get(key);
+   //          if (param) {
+   //             param.value = value;
+   //             console.log(`Drone: ${key} = ${value}`);
+   //          } else {
+   //             // Try with poly/ prefix
+   //             const polyParam = droneDevice.parametersById.get(`poly/${key}`);
+   //             if (polyParam) {
+   //                polyParam.value = value;
+   //                console.log(`Drone: poly/${key} = ${value}`);
+   //             }
+   //          }
+   //       });
+
+   //       console.log("🎵 Drone configured!");
+   //    } catch (err) {
+   //       console.error("Drone setup error:", err);
+   //    }
+   // }
+
+   function playMIDINote(note, duration = 250) {
+      if (!mainSynth || !audioContext) return;
+
+      if (audioContext.state === "suspended") {
+         audioContext.resume();
+      }
+
+      const midiChannel = 0;
+      const midiPort = 0;
+      const velocity = 100;
+      const currentTime = mainSynth.context.currentTime * 1000;
+
+      // Send MIDI to main synth only
+      const noteOnMessage = [144 + midiChannel, note, velocity];
+      const noteOnEvent = new window.RNBO.MIDIEvent(
+         currentTime,
+         midiPort,
+         noteOnMessage,
+      );
+      mainSynth.scheduleEvent(noteOnEvent);
+
+      const noteOffMessage = [128 + midiChannel, note, 0];
+      const noteOffEvent = new window.RNBO.MIDIEvent(
+         currentTime + duration,
+         midiPort,
+         noteOffMessage,
+      );
+      mainSynth.scheduleEvent(noteOffEvent);
+   }
+
+   async function initializeMagenta() {
+      try {
+         magentaModel = new mm.MusicVAE(
+            "https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/trio_4bar",
+         );
+         await magentaModel.initialize();
+         console.log("Magenta model loaded");
+      } catch (err) {
+         console.error("Magenta failed:", err);
+      }
+   }
+
+   async function generateMelody(numNotes = 16) {
+      if (!magentaModel) {
+         console.warn("Model not ready, using random notes");
+         return Array(numNotes)
+            .fill()
+            .map(() => Math.floor(Math.random() * 37) + 48);
+      }
+
+      try {
+         const samples = await magentaModel.sample(1, 0.7);
+         let notes = samples[0].notes.slice(0, numNotes).map((n) => n.pitch);
+
+         const pentatonic = [
+            48, 50, 52, 55, 57, 60, 62, 64, 67, 69, 72, 74, 76,
+         ];
+
+         notes = notes.map((note) => {
+            return pentatonic.reduce((closest, pNote) => {
+               return Math.abs(pNote - note) < Math.abs(closest - note)
+                  ? pNote
+                  : closest;
+            }, pentatonic[0]);
+         });
+
+         return notes;
+      } catch (err) {
+         console.error("Generation failed:", err);
+         return Array(numNotes)
+            .fill()
+            .map(() => Math.floor(Math.random() * 37) + 48);
+      }
+   }
+
+   onMount(() => {
+      setupRNBO();
+
+      const magentaScript = document.createElement("script");
+      magentaScript.src = "https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1";
+      magentaScript.onload = async () => {
+         console.log("Magenta.js loaded");
+         await initializeMagenta();
+         console.log("Magenta model ready");
+         loadP5();
+      };
+      document.body.appendChild(magentaScript);
+   });
+
+   function loadP5() {
+      const script = document.createElement("script");
+      script.src =
+         "https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js";
+
+      script.onload = () => {
+         new window.p5((p) => {
+            const canvasSize = 720;
+            const rows = 4;
+            const cols = 4;
+            const ellipseSize = 100;
+            let ellipseStates = [];
+            let midiNotes = [];
+
+            for (let i = 0; i < rows; i++) {
+               ellipseStates[i] = [];
+               midiNotes[i] = [];
+               for (let j = 0; j < cols; j++) {
+                  ellipseStates[i][j] = false;
+                  midiNotes[i][j] = 60;
+               }
+            }
+
+            generateMelody(rows * cols).then((generatedNotes) => {
+               console.log("🎼 Generated notes:", generatedNotes);
+               let noteIndex = 0;
+               for (let i = 0; i < rows; i++) {
+                  for (let j = 0; j < cols; j++) {
+                     midiNotes[i][j] = generatedNotes[noteIndex] || 60;
+                     noteIndex++;
+                  }
+               }
+               console.log("🎹 Final grid:", midiNotes);
+            });
+
+            const xSpacing = canvasSize / (cols + 1);
+            const ySpacing = canvasSize / (rows + 1);
+
+            p.setup = () => {
+               p.createCanvas(canvasSize, canvasSize);
+               p.background(255);
+               p.textAlign(p.CENTER, p.CENTER);
+            };
+
+            p.draw = () => {
+               p.background(255);
+               for (let i = 0; i < cols; i++) {
+                  for (let j = 0; j < rows; j++) {
+                     const x = xSpacing * (i + 1);
+                     const y = ySpacing * (j + 1);
+                     p.fill(ellipseStates[j][i] ? 0 : 255);
+                     p.stroke(0);
+                     p.ellipse(x, y, ellipseSize, ellipseSize);
+                     p.fill(ellipseStates[j][i] ? 255 : 0);
+                     p.textSize(16);
+                     p.text(ellipseStates[j][i] ? "ON" : "OFF", x, y - 8);
+                     p.textSize(12);
+                     p.text(`♪${midiNotes[j][i]}`, x, y + 10);
+                  }
+               }
+            };
+
+            function triggerRipple(clickedRow, clickedCol, newState) {
+               const clickedX = xSpacing * (clickedCol + 1);
+               const clickedY = ySpacing * (clickedRow + 1);
+               let ellipsesWithDistance = [];
+
+               for (let i = 0; i < cols; i++) {
+                  for (let j = 0; j < rows; j++) {
+                     const x = xSpacing * (i + 1);
+                     const y = ySpacing * (j + 1);
+                     const distance = p.dist(clickedX, clickedY, x, y);
+                     ellipsesWithDistance.push({
+                        row: j,
+                        col: i,
+                        distance: distance,
+                        midiNote: midiNotes[j][i],
+                     });
+                  }
+               }
+
+               ellipsesWithDistance.sort((a, b) => a.distance - b.distance);
+               ellipsesWithDistance.forEach((ellipse, index) => {
+                  setTimeout(() => {
+                     ellipseStates[ellipse.row][ellipse.col] = newState;
+                     if (newState) {
+                        playMIDINote(ellipse.midiNote, 200);
+                     }
+                  }, index * 300);
+               });
+            }
+
+            p.mousePressed = () => {
+               // Resume audio on first click
+               if (audioContext?.state === "suspended") {
+                  audioContext.resume().then(() => {
+                     console.log("🔊 Audio started - both devices playing!");
+                  });
+               }
+
+               // Handle ellipse clicks
+               for (let i = 0; i < cols; i++) {
+                  for (let j = 0; j < rows; j++) {
+                     const x = xSpacing * (i + 1);
+                     const y = ySpacing * (j + 1);
+                     const distance = p.dist(p.mouseX, p.mouseY, x, y);
+                     if (distance < ellipseSize / 2) {
+                        triggerRipple(j, i, !ellipseStates[j][i]);
+                        return;
+                     }
+                  }
+               }
+            };
+         });
+      };
+      document.body.appendChild(script);
+   }
+</script>
+
+<style>
+   :global(body) {
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: #f0f0f0;
+   }
+</style>
