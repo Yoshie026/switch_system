@@ -1,5 +1,6 @@
 <script>
-   import { onMount } from "svelte";
+   import { onMount, onDestroy } from "svelte";
+   import mqtt from "mqtt";
 
    let mainSynth = null;
    let droneDevice = null;
@@ -22,7 +23,6 @@
 
          if (topic === "switch/trigger") {
             const [row, col] = msg.split(",").map(Number);
-            // Trigger from p5 instance
             if (window.p5Instance) {
                window.p5Instance.triggerFromMQTT(row, col);
             }
@@ -31,6 +31,10 @@
          if (topic === "switch/regenerate") {
             regenerateMelody();
          }
+      });
+
+      mqttClient.on("error", (err) => {
+         console.error("MQTT Error:", err);
       });
    }
 
@@ -93,7 +97,7 @@
          mainSynth.node.connect(mainGain);
          droneDevice.node.connect(droneGain);
 
-         console.log("Both RNBO devices loaded");
+         console.log("RNBO devices loaded");
 
          setupMainSynth();
          setupDrone();
@@ -106,35 +110,23 @@
       if (!droneDevice) return;
 
       try {
-         // activate droneOn when the page loads
          const droneOnParam = droneDevice.parametersById.get("droneOn");
          if (droneOnParam) {
             droneOnParam.value = 1;
             console.log("🎛️ droneOn = 1");
          }
 
-         // send note + velocity directly via notein equivalent (MIDIEvent)
          const midiPort = 0;
-         const note = 48; // C2 or whatever root you want
+         const note = 48;
          const velocity = 100;
          const currentTime = droneDevice.context.currentTime * 1000;
 
          const noteOn = [144, note, velocity];
-         const noteOff = [128, note, 0];
-
          droneDevice.scheduleEvent(
             new window.RNBO.MIDIEvent(currentTime, midiPort, noteOn),
          );
 
-         console.log("🎵 Drone started via notein");
-
-         // Optionally, keep the drone sustained (no noteOff)
-         // Uncomment below if you want a fixed length instead of continuous:
-         /*
-      droneDevice.scheduleEvent(
-         new window.RNBO.MIDIEvent(currentTime + 2000, midiPort, noteOff)
-      );
-      */
+         console.log("🎵 Drone started");
       } catch (err) {
          console.error("Drone setup error:", err);
       }
@@ -153,7 +145,6 @@
    function setupMainSynth() {
       if (!mainSynth) return;
 
-      // Set main synth sound preset
       const params = {
          filterCut: 1000,
          filterQ: 0.1,
@@ -165,8 +156,6 @@
          "poly/envelope/sustain": 0,
          "poly/envelope/release": 1000,
          "poly/oscillator/mode": 0,
-         "poly/envelope/release": 1000,
-         "poly/delay/fb": 0.75,
          "poly/delay/fb": 0.75,
       };
 
@@ -178,38 +167,6 @@
          }
       });
    }
-
-   // function setupDrone() {
-   //    if (!droneDevice) return;
-
-   //    try {
-   //       // Set drone parameters (adjust these based on your drone patch)
-   //       const droneParams = {
-   //          droneOn: 1,
-   //          droneNote: 48,
-   //          droneVelocity: 100,
-   //       };
-
-   //       Object.entries(droneParams).forEach(([key, value]) => {
-   //          const param = droneDevice.parametersById.get(key);
-   //          if (param) {
-   //             param.value = value;
-   //             console.log(`Drone: ${key} = ${value}`);
-   //          } else {
-   //             // Try with poly/ prefix
-   //             const polyParam = droneDevice.parametersById.get(`poly/${key}`);
-   //             if (polyParam) {
-   //                polyParam.value = value;
-   //                console.log(`Drone: poly/${key} = ${value}`);
-   //             }
-   //          }
-   //       });
-
-   //       console.log("🎵 Drone configured!");
-   //    } catch (err) {
-   //       console.error("Drone setup error:", err);
-   //    }
-   // }
 
    function playMIDINote(note, duration = 250) {
       if (!mainSynth || !audioContext) return;
@@ -223,7 +180,6 @@
       const velocity = 100;
       const currentTime = mainSynth.context.currentTime * 1000;
 
-      // Send MIDI to main synth only
       const noteOnMessage = [144 + midiChannel, note, velocity];
       const noteOnEvent = new window.RNBO.MIDIEvent(
          currentTime,
@@ -285,6 +241,7 @@
             .map(() => Math.floor(Math.random() * 37) + 48);
       }
    }
+
    async function regenerateMelody() {
       const newNotes = await generateMelody(16);
       if (window.p5Instance) {
@@ -292,43 +249,12 @@
       }
    }
 
-   onMount(() => {
-      setupRNBO();
-
-      const magentaScript = document.createElement("script");
-      magentaScript.src = "https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1";
-      magentaScript.onload = async () => {
-         console.log("Magenta.js loaded");
-         await initializeMagenta();
-         console.log("Magenta model ready");
-         loadP5();
-      };
-      document.body.appendChild(magentaScript);
-   });
-
    function loadP5() {
       const script = document.createElement("script");
       script.src =
          "https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js";
 
       script.onload = () => {
-         const p5Instance = new window.p5((p) => {
-            window.p5Instance = {
-         triggerFromMQTT: (row, col) => {
-            if (row >= 0 && row < rows && col >= 0 && col < cols) {
-               triggerRipple(row, col, !ellipseStates[row][col]);
-            }
-         },
-         updateNotes: (newNotes) => {
-            let idx = 0;
-            for (let i = 0; i < rows; i++) {
-               for (let j = 0; j < cols; j++) {
-                  midiNotes[i][j] = newNotes[idx++] || 60;
-               }
-            }
-            console.log('Notes updated via MQTT');
-         }
-      };
          new window.p5((p) => {
             const canvasSize = 720;
             const rows = 4;
@@ -346,8 +272,26 @@
                }
             }
 
+            // Expose functions to window after variables are defined
+            window.p5Instance = {
+               triggerFromMQTT: (row, col) => {
+                  if (row >= 0 && row < rows && col >= 0 && col < cols) {
+                     triggerRipple(row, col, !ellipseStates[row][col]);
+                  }
+               },
+               updateNotes: (newNotes) => {
+                  let idx = 0;
+                  for (let i = 0; i < rows; i++) {
+                     for (let j = 0; j < cols; j++) {
+                        midiNotes[i][j] = newNotes[idx++] || 60;
+                     }
+                  }
+                  console.log("Notes updated via MQTT");
+               },
+            };
+
             generateMelody(rows * cols).then((generatedNotes) => {
-               console.log("🎼 Generated notes:", generatedNotes);
+               console.log(" Generated notes:", generatedNotes);
                let noteIndex = 0;
                for (let i = 0; i < rows; i++) {
                   for (let j = 0; j < cols; j++) {
@@ -389,7 +333,13 @@
                const clickedX = xSpacing * (clickedCol + 1);
                const clickedY = ySpacing * (clickedRow + 1);
                let ellipsesWithDistance = [];
-               publishState(clickedRow, clickedCol, newState, midiNotes[clickedRow][clickedCol]);
+
+               publishState(
+                  clickedRow,
+                  clickedCol,
+                  newState,
+                  midiNotes[clickedRow][clickedCol],
+               );
 
                for (let i = 0; i < cols; i++) {
                   for (let j = 0; j < rows; j++) {
@@ -417,14 +367,12 @@
             }
 
             p.mousePressed = () => {
-               // Resume audio on first click
                if (audioContext?.state === "suspended") {
                   audioContext.resume().then(() => {
-                     console.log("🔊 Audio started - both devices playing!");
+                     console.log("Audio started");
                   });
                }
 
-               // Handle ellipse clicks
                for (let i = 0; i < cols; i++) {
                   for (let j = 0; j < rows; j++) {
                      const x = xSpacing * (i + 1);
@@ -439,8 +387,31 @@
             };
          });
       };
+
       document.body.appendChild(script);
    }
+
+   onMount(() => {
+      setupRNBO();
+      setupMQTT();
+
+      const magentaScript = document.createElement("script");
+      magentaScript.src = "https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1";
+      magentaScript.onload = async () => {
+         console.log("Magenta.js loaded");
+         await initializeMagenta();
+         console.log("Magenta model ready");
+         loadP5();
+      };
+      document.body.appendChild(magentaScript);
+   });
+
+   onDestroy(() => {
+      if (mqttClient) {
+         mqttClient.end();
+         console.log("MQTT disconnected");
+      }
+   });
 </script>
 
 <style>
@@ -448,7 +419,7 @@
    :global(body) {
       margin: 0;
       padding: 0;
-      overflow: hidden; /* ← Add this */
+      overflow: hidden;
       width: 100vw;
       height: 100vh;
    }
@@ -460,7 +431,6 @@
       background: #f0f0f0;
    }
 
-   /* Hide all scrollbars */
    :global(*) {
       scrollbar-width: none;
       -ms-overflow-style: none;
