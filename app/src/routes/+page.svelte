@@ -113,7 +113,7 @@
          const droneOnParam = droneDevice.parametersById.get("droneOn");
          if (droneOnParam) {
             droneOnParam.value = 1;
-            console.log("🎛️ droneOn = 1");
+            console.log("droneOn = 1");
          }
 
          const midiPort = 0;
@@ -126,7 +126,7 @@
             new window.RNBO.MIDIEvent(currentTime, midiPort, noteOn),
          );
 
-         console.log("🎵 Drone started");
+         console.log("Drone started");
       } catch (err) {
          console.error("Drone setup error:", err);
       }
@@ -135,8 +135,9 @@
    function loadRNBOScript(version) {
       return new Promise((resolve, reject) => {
          const el = document.createElement("script");
-         el.src = `https://c74-public.nyc3.digitaloceanspaces.com/rnbo/${encodeURIComponent(version)}/rnbo.min.js`;
+         el.src = "/lib/rnbo.min.js";
          el.onload = resolve;
+         console.log(el.src);
          el.onerror = () => reject(new Error("Failed to load rnbo.js"));
          document.body.append(el);
       });
@@ -155,7 +156,7 @@
          "poly/envelope/decay": 200,
          "poly/envelope/sustain": 0,
          "poly/envelope/release": 1000,
-         "poly/oscillator/mode": 0,
+         "poly/oscillator/mode": 1,
          "poly/delay/fb": 0.75,
       };
 
@@ -251,8 +252,7 @@
 
    function loadP5() {
       const script = document.createElement("script");
-      script.src =
-         "https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js";
+      script.src = "/lib/p5.min.js";
 
       script.onload = () => {
          new window.p5((p) => {
@@ -396,7 +396,7 @@
       setupMQTT();
 
       const magentaScript = document.createElement("script");
-      magentaScript.src = "https://cdn.jsdelivr.net/npm/@magenta/music@1.23.1";
+      magentaScript.src = "/lib/magenta.js";
       magentaScript.onload = async () => {
          console.log("Magenta.js loaded");
          await initializeMagenta();
