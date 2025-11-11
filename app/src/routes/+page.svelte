@@ -73,19 +73,22 @@
       const row = Math.floor((switchNum - 1) / 4);
       const col = (switchNum - 1) % 4;
 
+      const flippedCol = 3 - col; // mirror horizontally
+
       if (window.p5Instance && !isAnimating) {
-         window.p5Instance.triggerAnimation(row, col, state);
+         window.p5Instance.triggerAnimation(row, flippedCol, state);
       }
    }
 
-   function publishSwitchCommand(switchNum, state) {
+   function publishSwitchCommand(row, col, state) {
+      const flippedCol = 3 - col; // mirror to match microcontroller numbering
+      const switchNum = row * 4 + flippedCol + 1;
       if (mqttClient?.connected) {
          const message = state ? "on" : "off";
          mqttClient.publish(`switch/${switchNum}`, message);
          console.log(`→ Microcontroller: switch/${switchNum} = ${message}`);
       }
    }
-
    function publishState(row, col, state, note) {
       if (mqttClient?.connected) {
          mqttClient.publish(
@@ -183,7 +186,7 @@
    function loadRNBOScript(version) {
       return new Promise((resolve, reject) => {
          const el = document.createElement("script");
-         el.src = `https://c74-public.nyc3.digitaloceanspaces.com/rnbo/${encodeURIComponent(version)}/rnbo.min.js`;
+         el.src = `../lib/rnbo.min.js`;
          el.onload = resolve;
          el.onerror = () => reject(new Error("Failed to load rnbo.js"));
          document.body.append(el);
@@ -319,8 +322,8 @@
                }
             }
 
-            const xSpacing = canvasSize / (cols + 1);
-            const ySpacing = canvasSize / (rows + 1);
+            const x = xSpacing * (cols - i);
+            const y = ySpacing * (j + 1);
 
             function checkAllOff() {
                for (let i = 0; i < rows; i++) {
@@ -376,7 +379,7 @@
 
                for (let i = 0; i < cols; i++) {
                   for (let j = 0; j < rows; j++) {
-                     const x = xSpacing * (i + 1);
+                     const x = xSpacing * (cols - i);
                      const y = ySpacing * (j + 1);
                      const distance = p.dist(clickedX, clickedY, x, y);
                      ellipsesWithDistance.push({
@@ -809,7 +812,7 @@
       setupMQTT();
 
       const magentaScript = document.createElement("script");
-      magentaScript.src = "/lib/magenta.js";
+      magentaScript.src = "../lib/magenta.js";
       magentaScript.onload = async () => {
          console.log("Magenta.js loaded");
          await initializeMagenta();
