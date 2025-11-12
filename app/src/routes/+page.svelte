@@ -35,6 +35,7 @@
          console.log("MQTT Connected");
 
          mqttClient.subscribe("switch/+");
+         mqttClient.subscribe("switch/master");
          mqttClient.subscribe("pattern/set");
          mqttClient.subscribe("switch/regenerate");
       });
@@ -58,6 +59,12 @@
          if (topic === "switch/regenerate") {
             regenerateMelody();
          }
+
+         if (topic === "switch/master") {
+            const isOn = msg.toLowerCase() === "on" || msg === "1";
+            console.log(`🔘 Master switch: ${isOn ? "ON" : "OFF"}`);
+            handleMasterSwitch(isOn);
+         }
       });
 
       mqttClient.on("error", (err) => {
@@ -69,26 +76,63 @@
       console.log(
          `Physical switch ${switchNum} is now ${state ? "ON" : "OFF"}`,
       );
-
       const row = Math.floor((switchNum - 1) / 4);
       const col = (switchNum - 1) % 4;
-
-      const flippedCol = 3 - col; // mirror horizontally
-
+      const flippedCol = 3 - col;
       if (window.p5Instance && !isAnimating) {
          window.p5Instance.triggerAnimation(row, flippedCol, state);
       }
    }
 
-   function publishSwitchCommand(row, col, state) {
-      const flippedCol = 3 - col; // mirror to match microcontroller numbering
-      const switchNum = row * 4 + flippedCol + 1;
-      if (mqttClient?.connected) {
-         const message = state ? "on" : "off";
-         mqttClient.publish(`switch/${switchNum}`, message);
-         console.log(`→ Microcontroller: switch/${switchNum} = ${message}`);
+   function handleMasterSwitch(isOn) {
+      if (!window.p5Instance || isAnimating) return;
+
+      console.log(
+         `Master switch triggered — ${isOn ? "Vertical U→D" : "Vertical D→U"}`,
+      );
+      isAnimating = true;
+
+      const sequence = [];
+      const rows = 4;
+      const cols = 4;
+
+      if (isOn) {
+         // Vertical top → bottom
+         for (let i = 0; i < cols; i++) {
+            for (let j = 0; j < rows; j++) {
+               sequence.push({ row: j, col: i });
+            }
+         }
+      } else {
+         // Vertical bottom → top (reverse order)
+         for (let i = cols - 1; i >= 0; i--) {
+            for (let j = rows - 1; j >= 0; j--) {
+               sequence.push({ row: j, col: i });
+            }
+         }
       }
+
+      const totalDuration = sequence.length * 150;
+
+      sequence.forEach((item, index) => {
+         setTimeout(() => {
+            window.p5Instance.triggerAnimation(item.row, item.col, isOn);
+
+            if (index === sequence.length - 1) {
+               setTimeout(() => {
+                  isAnimating = false;
+               }, 500);
+            }
+         }, index * 150);
+      });
    }
+
+   function publishSwitchCommand(row, col, state) {
+      const flippedCol = 3 - col; // horizontal mirror
+      const switchNum = row * 4 + flippedCol + 1;
+      client.publish(`switch/${switchNum}`, state ? "ON" : "OFF");
+   }
+
    function publishState(row, col, state, note) {
       if (mqttClient?.connected) {
          mqttClient.publish(
@@ -101,6 +145,13 @@
                timestamp: Date.now(),
             }),
          );
+      }
+   }
+
+   function publishMasterState(isOn) {
+      if (mqttClient?.connected) {
+         mqttClient.publish("switch/master", isOn ? "ON" : "OFF");
+         console.log(`📤 Published master ${isOn ? "ON" : "OFF"}`);
       }
    }
 
@@ -578,7 +629,7 @@
                            regenerateNotes();
                         }, 500);
                      }
-                  }, index * 300);
+                  }, index * 500);
                });
 
                return totalDuration + 500;
@@ -614,7 +665,7 @@
                            regenerateNotes();
                         }, 500);
                      }
-                  }, index * 300);
+                  }, index * 500);
                });
 
                return totalDuration + 500;
