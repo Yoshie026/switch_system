@@ -84,47 +84,118 @@
       }
    }
 
-   function handleMasterSwitch(isOn) {
-      if (!window.p5Instance || isAnimating) return;
+   // function handleMasterSwitch(isOn) {
+   //    if (!window.p5Instance || isAnimating) return;
 
-      console.log(
-         `Master switch triggered — ${isOn ? "Vertical U→D" : "Vertical D→U"}`,
-      );
-      isAnimating = true;
+   //    console.log(
+   //       `Master switch triggered — ${isOn ? "Vertical U→D" : "Vertical D→U"}`,
+   //    );
+   //    isAnimating = true;
 
-      const sequence = [];
-      const rows = 4;
-      const cols = 4;
+   //    const sequence = [];
+   //    const rows = 4;
+   //    const cols = 4;
 
-      if (isOn) {
-         // Vertical top → bottom
-         for (let i = 0; i < cols; i++) {
-            for (let j = 0; j < rows; j++) {
-               sequence.push({ row: j, col: i });
-            }
+   //    if (isOn) {
+   //       // Vertical top → bottom
+   //       for (let i = 0; i < cols; i++) {
+   //          for (let j = 0; j < rows; j++) {
+   //             sequence.push({ row: j, col: i });
+   //          }
+   //       }
+   //    } else {
+   //       // Vertical bottom → top (reverse order)
+   //       for (let i = cols - 1; i >= 0; i--) {
+   //          for (let j = rows - 1; j >= 0; j--) {
+   //             sequence.push({ row: j, col: i });
+   //          }
+   //       }
+   //    }
+
+   //    const totalDuration = sequence.length * 150;
+
+   //    sequence.forEach((item, index) => {
+   //       setTimeout(() => {
+   //          window.p5Instance.triggerAnimation(item.row, item.col, isOn);
+
+   //          if (index === sequence.length - 1) {
+   //             setTimeout(() => {
+   //                isAnimating = false;
+   //             }, 500);
+   //          }
+   //       }, index * 150);
+   //    });
+   // }
+
+   function timerForIdling() {
+      // 1) choose random time 200-450 sec
+      const min = 200;
+      const max = 450;
+      const rand = Math.floor(Math.random() * (max - min + 1) + min);
+
+      setTimeout(() => {
+         // SAFETY GUARDS
+         if (!window.p5Instance) {
+            console.log("Idling: p5 not ready");
+            timerForIdling();
+            return;
          }
-      } else {
-         // Vertical bottom → top (reverse order)
-         for (let i = cols - 1; i >= 0; i--) {
-            for (let j = rows - 1; j >= 0; j--) {
-               sequence.push({ row: j, col: i });
-            }
+         if (isAnimating) {
+            console.log("Idling: animation in progress, skipping");
+            timerForIdling();
+            return;
          }
-      }
 
-      const totalDuration = sequence.length * 150;
-
-      sequence.forEach((item, index) => {
-         setTimeout(() => {
-            window.p5Instance.triggerAnimation(item.row, item.col, isOn);
-
-            if (index === sequence.length - 1) {
-               setTimeout(() => {
-                  isAnimating = false;
-               }, 500);
+         // 2) Check if all ellipses are off
+         const allOff = (() => {
+            const grid = window.p5Instance.getEllipseStates?.();
+            if (!grid) return false;
+            for (let r = 0; r < 4; r++) {
+               for (let c = 0; c < 4; c++) {
+                  if (grid[r][c]) return false;
+               }
             }
-         }, index * 150);
-      });
+            return true;
+         })();
+
+         if (!allOff) {
+            console.log("Idling: some switches ON, skipping");
+            timerForIdling();
+            return;
+         }
+
+         console.log("🌙 Idle detected → triggering idle animation...");
+
+         // 3) Select a random cell (row, col)
+         const row = Math.floor(Math.random() * 4);
+         const col = Math.floor(Math.random() * 4);
+
+         // 4) Choose a random pattern
+         const patternList = [
+            "ripple",
+            "horizontal_lr",
+            "horizontal_rl",
+            "vertical_ud",
+            "vertical_du",
+            "random",
+         ];
+         const chosenPattern =
+            patternList[Math.floor(Math.random() * patternList.length)];
+
+         currentPattern = chosenPattern;
+         console.log(`🌙 Idle pattern selected: ${chosenPattern}`);
+
+         // Reflect pattern physically
+         if (mqttClient?.connected) {
+            mqttClient.publish("pattern/set", chosenPattern);
+         }
+
+         // 5) Trigger ON → animation
+         window.p5Instance.triggerAnimation(row, col, true);
+
+         // restart timer for next idle
+         timerForIdling();
+      }, rand * 1000);
    }
 
    function publishSwitchCommand(row, col, state) {
@@ -151,7 +222,7 @@
    function publishMasterState(isOn) {
       if (mqttClient?.connected) {
          mqttClient.publish("switch/master", isOn ? "ON" : "OFF");
-         console.log(`📤 Published master ${isOn ? "ON" : "OFF"}`);
+         console.log(`Published master ${isOn ? "ON" : "OFF"}`);
       }
    }
 
