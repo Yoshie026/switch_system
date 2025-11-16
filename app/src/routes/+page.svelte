@@ -2,14 +2,19 @@
    import { onMount, onDestroy } from "svelte";
    import mqtt from "mqtt";
 
-   let mainSynth = null;
-   let droneDevice = null;
+   // COMPLETELY SEPARATE: Main synth and Drone
+   let mainSynth = null; // For playing notes only
+   let droneDevice = null; // For background drone only
    let audioContext = null;
    let magentaModel = null;
    let mqttClient = null;
    let currentPattern = "ripple";
    let isAnimating = false;
    let animationTimeout = null;
+
+   // DRONE-ONLY variables (nothing to do with synth)
+   let droneNotes = [36, 48, 55, 60, 67]; // C & G harmony
+   let droneActive = false;
 
    const patterns = [
       { id: "ripple", name: "Ripple" },
@@ -20,56 +25,124 @@
       { id: "random", name: "Random" },
    ];
 
+   const patternPresets = {
+      ripple: {
+         filterCut: 1200,
+         filterQ: 0.1,
+         reverbMix: 0.25,
+         "poly/envelope/attack": 40,
+         "poly/envelope/release": 600,
+         "poly/oscillator/mode": 1,
+      },
+
+      horizontal_lr: {
+         filterCut: 1500,
+         filterQ: 0.18,
+         reverbMix: 0.3,
+         "poly/envelope/attack": 10,
+         "poly/envelope/release": 300,
+         "poly/oscillator/mode": 0,
+      },
+
+      horizontal_rl: {
+         filterCut: 900,
+         filterQ: 0.2,
+         reverbMix: 0.35,
+         "poly/envelope/attack": 80,
+         "poly/envelope/release": 900,
+         "poly/oscillator/mode": 2,
+      },
+
+      vertical_ud: {
+         filterCut: 700,
+         filterQ: 0.12,
+         reverbMix: 0.2,
+         "poly/envelope/attack": 60,
+         "poly/envelope/release": 500,
+         "poly/oscillator/mode": 3,
+      },
+
+      vertical_du: {
+         filterCut: 500,
+         filterQ: 0.15,
+         reverbMix: 0.4,
+         "poly/envelope/attack": 120,
+         "poly/envelope/release": 1000,
+         "poly/oscillator/mode": 4,
+      },
+
+      random: {
+         filterCut: 600 + Math.random() * 1200,
+         filterQ: 0.1 + Math.random() * 0.2,
+         reverbMix: 0.2 + Math.random() * 0.4,
+         "poly/envelope/attack": 20 + Math.random() * 120,
+         "poly/envelope/release": 300 + Math.random() * 900,
+         "poly/oscillator/mode": Math.floor(Math.random() * 5),
+      },
+   };
+
    function setPattern(patternId) {
       currentPattern = patternId;
+
       if (mqttClient?.connected) {
          mqttClient.publish("pattern/set", patternId);
       }
+
+      if (patternPresets[patternId]) {
+         const preset = patternPresets[patternId];
+         applySynthParams(preset);
+      }
+
       console.log(`Pattern set to: ${patternId}`);
    }
 
    function setupMQTT() {
-      mqttClient = mqtt.connect("ws://localhost:9001");
+      try {
+         mqttClient = mqtt.connect("ws://localhost:9001");
 
-      mqttClient.on("connect", () => {
-         console.log("MQTT Connected");
+         mqttClient.on("connect", () => {
+            console.log("MQTT Connected");
 
-         mqttClient.subscribe("switch/+");
-         mqttClient.subscribe("switch/master");
-         mqttClient.subscribe("pattern/set");
-         mqttClient.subscribe("switch/regenerate");
-      });
+            mqttClient.subscribe("switch/+");
+            mqttClient.subscribe("switch/master");
+            mqttClient.subscribe("pattern/set");
+            mqttClient.subscribe("switch/regenerate");
+         });
 
-      mqttClient.on("message", (topic, message) => {
-         const msg = message.toString();
-         console.log(`${topic}: ${msg}`);
+         mqttClient.on("message", (topic, message) => {
+            const msg = message.toString();
+            console.log(`${topic}: ${msg}`);
 
-         const switchMatch = topic.match(/^switch\/(\d+)$/);
-         if (switchMatch) {
-            const switchNum = parseInt(switchMatch[1]);
-            const state = msg.toLowerCase() === "on" || msg === "1";
-            handlePhysicalSwitchUpdate(switchNum, state);
-         }
+            const switchMatch = topic.match(/^switch\/(\d+)$/);
+            if (switchMatch) {
+               const switchNum = parseInt(switchMatch[1]);
+               const state = msg.toLowerCase() === "on" || msg === "1";
+               handlePhysicalSwitchUpdate(switchNum, state);
+            }
 
-         if (topic === "pattern/set") {
-            currentPattern = msg.toLowerCase();
-            console.log(`Pattern changed to: ${currentPattern}`);
-         }
+            if (topic === "pattern/set") {
+               currentPattern = msg.toLowerCase();
+               if (patternPresets[msg]) applySynthParams(patternPresets[msg]);
+               console.log(`Pattern changed to: ${currentPattern}`);
+            }
 
-         if (topic === "switch/regenerate") {
-            regenerateMelody();
-         }
+            if (topic === "switch/regenerate") {
+               regenerateMelody();
+            }
 
-         if (topic === "switch/master") {
-            const isOn = msg.toLowerCase() === "on" || msg === "1";
-            console.log(`🔘 Master switch: ${isOn ? "ON" : "OFF"}`);
-            handleMasterSwitch(isOn);
-         }
-      });
+            if (topic === "switch/master") {
+               const isOn = msg.toLowerCase() === "on" || msg === "1";
+               console.log(`🔘 Master switch: ${isOn ? "ON" : "OFF"}`);
+               handleMasterSwitch(isOn);
+            }
+         });
 
-      mqttClient.on("error", (err) => {
-         console.error("MQTT Error:", err);
-      });
+         mqttClient.on("error", (err) => {
+            console.error("MQTT Error:", err);
+         });
+      } catch (err) {
+         console.error("MQTT setup failed:", err);
+      }
    }
 
    function handlePhysicalSwitchUpdate(switchNum, state) {
@@ -84,57 +157,51 @@
       }
    }
 
-   // function handleMasterSwitch(isOn) {
-   //    if (!window.p5Instance || isAnimating) return;
+   function handleMasterSwitch(isOn) {
+      if (!window.p5Instance || isAnimating) return;
 
-   //    console.log(
-   //       `Master switch triggered — ${isOn ? "Vertical U→D" : "Vertical D→U"}`,
-   //    );
-   //    isAnimating = true;
+      console.log(
+         `Master switch triggered — ${isOn ? "Vertical U→D" : "Vertical D→U"}`,
+      );
+      isAnimating = true;
 
-   //    const sequence = [];
-   //    const rows = 4;
-   //    const cols = 4;
+      const sequence = [];
+      const rows = 4;
+      const cols = 4;
 
-   //    if (isOn) {
-   //       // Vertical top → bottom
-   //       for (let i = 0; i < cols; i++) {
-   //          for (let j = 0; j < rows; j++) {
-   //             sequence.push({ row: j, col: i });
-   //          }
-   //       }
-   //    } else {
-   //       // Vertical bottom → top (reverse order)
-   //       for (let i = cols - 1; i >= 0; i--) {
-   //          for (let j = rows - 1; j >= 0; j--) {
-   //             sequence.push({ row: j, col: i });
-   //          }
-   //       }
-   //    }
+      if (isOn) {
+         for (let i = 0; i < cols; i++) {
+            for (let j = 0; j < rows; j++) {
+               sequence.push({ row: j, col: i });
+            }
+         }
+      } else {
+         for (let i = cols - 1; i >= 0; i--) {
+            for (let j = rows - 1; j >= 0; j--) {
+               sequence.push({ row: j, col: i });
+            }
+         }
+      }
 
-   //    const totalDuration = sequence.length * 150;
+      sequence.forEach((item, index) => {
+         setTimeout(() => {
+            window.p5Instance.triggerAnimation(item.row, item.col, isOn);
 
-   //    sequence.forEach((item, index) => {
-   //       setTimeout(() => {
-   //          window.p5Instance.triggerAnimation(item.row, item.col, isOn);
-
-   //          if (index === sequence.length - 1) {
-   //             setTimeout(() => {
-   //                isAnimating = false;
-   //             }, 500);
-   //          }
-   //       }, index * 150);
-   //    });
-   // }
+            if (index === sequence.length - 1) {
+               setTimeout(() => {
+                  isAnimating = false;
+               }, 500);
+            }
+         }, index * 150);
+      });
+   }
 
    function timerForIdling() {
-      // 1) choose random time 200-450 sec
       const min = 200;
       const max = 450;
       const rand = Math.floor(Math.random() * (max - min + 1) + min);
 
       setTimeout(() => {
-         // SAFETY GUARDS
          if (!window.p5Instance) {
             console.log("Idling: p5 not ready");
             timerForIdling();
@@ -146,7 +213,6 @@
             return;
          }
 
-         // 2) Check if all ellipses are off
          const allOff = (() => {
             const grid = window.p5Instance.getEllipseStates?.();
             if (!grid) return false;
@@ -166,11 +232,9 @@
 
          console.log("🌙 Idle detected → triggering idle animation...");
 
-         // 3) Select a random cell (row, col)
          const row = Math.floor(Math.random() * 4);
          const col = Math.floor(Math.random() * 4);
 
-         // 4) Choose a random pattern
          const patternList = [
             "ripple",
             "horizontal_lr",
@@ -185,23 +249,22 @@
          currentPattern = chosenPattern;
          console.log(`🌙 Idle pattern selected: ${chosenPattern}`);
 
-         // Reflect pattern physically
          if (mqttClient?.connected) {
             mqttClient.publish("pattern/set", chosenPattern);
          }
 
-         // 5) Trigger ON → animation
          window.p5Instance.triggerAnimation(row, col, true);
 
-         // restart timer for next idle
          timerForIdling();
       }, rand * 1000);
    }
 
    function publishSwitchCommand(row, col, state) {
-      const flippedCol = 3 - col; // horizontal mirror
+      const flippedCol = 3 - col;
       const switchNum = row * 4 + flippedCol + 1;
-      client.publish(`switch/${switchNum}`, state ? "ON" : "OFF");
+      if (mqttClient?.connected) {
+         mqttClient.publish(`switch/${switchNum}`, state ? "ON" : "OFF");
+      }
    }
 
    function publishState(row, col, state, note) {
@@ -230,13 +293,16 @@
       const WAContext = window.AudioContext || window.webkitAudioContext;
       audioContext = new WAContext();
 
-      const mainGain = audioContext.createGain();
-      const droneGain = audioContext.createGain();
-      const masterGain = audioContext.createGain();
+      // COMPLETELY SEPARATE AUDIO CHAINS
+      const mainGain = audioContext.createGain(); // Only for main synth
+      const droneGain = audioContext.createGain(); // Only for drone
+      const masterGain = audioContext.createGain(); // Final output
 
-      mainGain.gain.value = 0.7;
-      droneGain.gain.value = 0.3;
+      // INDEPENDENT VOLUME CONTROLS
+      mainGain.gain.value = 0.6; // Reduced from 0.7 to prevent clipping
+      droneGain.gain.value = 0.12; // Drone volume (independent!)
 
+      // Connect to master output
       mainGain.connect(masterGain);
       droneGain.connect(masterGain);
       masterGain.connect(audioContext.destination);
@@ -257,6 +323,7 @@
             await loadRNBOScript(synthPatcher.desc.meta.rnboversion);
          }
 
+         // CREATE TWO COMPLETELY SEPARATE DEVICES
          mainSynth = await window.RNBO.createDevice({
             context: audioContext,
             patcher: synthPatcher,
@@ -267,11 +334,11 @@
             patcher: dronePatcher,
          });
 
-         mainSynth.node.connect(mainGain);
-         droneDevice.node.connect(droneGain);
+         // CONNECT TO SEPARATE GAIN NODES
+         mainSynth.node.connect(mainGain); // Synth → mainGain only
+         droneDevice.node.connect(droneGain); // Drone → droneGain only
 
-         console.log("RNBO devices loaded");
-
+         // SETUP EACH INDEPENDENTLY
          setupMainSynth();
          setupDrone();
       } catch (err) {
@@ -283,83 +350,121 @@
       if (!droneDevice) return;
 
       try {
-         const droneOnParam = droneDevice.parametersById.get("droneOn");
-         if (droneOnParam) {
-            droneOnParam.value = 1;
-            console.log("droneOn = 1");
-         }
+         const droneParams = {
+            volume: 1.4,
 
+            droneOn: 1,
+
+            droneFilterType: 0,
+            droneFilterCut: 1000,
+            droneFilterQ: 0.6,
+
+            harmonics: 0.7, // drastically reduce harshness
+            overblow: 0.1,
+            fluctuate: 0.03,
+
+            reverbMix: 0.35, // reduce tail buildup
+            reverb_decay: 0.5,
+            reverb_rotate: 0.1,
+            damping: 0.15,
+         };
+
+         // Apply ONLY to droneDevice
+         Object.entries(droneParams).forEach(([key, value]) => {
+            const param = droneDevice.parametersById.get(key);
+            if (param) {
+               param.value = value;
+               console.log(`   Drone: ${key} = ${value}`);
+            }
+         });
+
+         // Start drone with MIDI notes
          const midiPort = 0;
-         const note = 48;
-         const velocity = 100;
+         const velocity = 60;
          const currentTime = droneDevice.context.currentTime * 1000;
 
-         const noteOn = [144, note, velocity];
-         droneDevice.scheduleEvent(
-            new window.RNBO.MIDIEvent(currentTime, midiPort, noteOn),
-         );
+         droneNotes.forEach((note) => {
+            const noteOn = [144, note, velocity];
+            droneDevice.scheduleEvent(
+               new window.RNBO.MIDIEvent(currentTime, midiPort, noteOn),
+            );
+         });
 
-         console.log("Drone started");
+         droneActive = true;
+         console.log("Drone started (background harmony only)");
       } catch (err) {
          console.error("Drone setup error:", err);
       }
    }
 
-   function loadRNBOScript(version) {
-      return new Promise((resolve, reject) => {
-         const el = document.createElement("script");
-         el.src = `../lib/rnbo.min.js`;
-         el.onload = resolve;
-         el.onerror = () => reject(new Error("Failed to load rnbo.js"));
-         document.body.append(el);
-      });
-   }
-
+   // ═══════════════════════════════════════════════════════════
+   // MAIN SYNTH SETUP - COMPLETELY INDEPENDENT FROM DRONE
+   // ═══════════════════════════════════════════════════════════
    function setupMainSynth() {
       if (!mainSynth) return;
 
+      // MAIN SYNTH-ONLY PARAMETERS - FIX HARSH LINGERING NOISE
       const params = {
-         filterCut: 1000,
-         filterQ: 0.1,
-         reverbTime: 3,
-         reverbMix: 0.5,
-         filterType: 2,
-         "poly/envelope/attack": 200,
-         "poly/envelope/decay": 200,
-         "poly/envelope/sustain": 0,
-         "poly/envelope/release": 1000,
-         "poly/oscillator/mode": 1,
-         "poly/delay/fb": 0.75,
+         // Filter - LOWER to remove harsh frequencies
+         filterCut: 1000, // Reduced from 1500 for less harshness
+         filterQ: 0.15, // Reduced from 0.2 for smoother
+         filterType: 1, // Lowpass
+
+         // Reverb - LESS reverb to avoid buildup
+         reverbTime: 4,
+         reverbMix: 0.4,
+
+         // Tuning
+         setTuning: 0,
+
+         // Envelope - CRITICAL: Smooth attack and LONG release to fade cleanly
+         "poly/envelope/attack": 50, // Increased from 30 - gentler start
+         "poly/envelope/decay": 200, // Increased from 150
+         "poly/envelope/sustain": 0.5, // Reduced from 0.7 - cleaner
+         "poly/envelope/release": 800, // Increased from 800 - longer fade to silence
+
+         "poly/oscillator/mode": 3,
+
+         // Delay - REDUCE FEEDBACK to prevent noise buildup
+         //"poly/delay/left_delay": 300,
+         //"poly/delay/fb": 0.15, // Reduced from 0.3 - less feedback
+         //"poly/delay/right_delay": 400,
       };
 
       Object.entries(params).forEach(([key, value]) => {
          const param = mainSynth.parametersById.get(key);
          if (param) {
             param.value = value;
-            console.log(`Main synth: ${key} = ${value}`);
+            console.log(`   Synth: ${key} = ${value}`);
          }
       });
    }
 
-   function playMIDINote(note, duration = 250) {
+   // ═══════════════════════════════════════════════════════════
+   // PLAY NOTE - ONLY AFFECTS MAIN SYNTH, NOT DRONE
+   // ═══════════════════════════════════════════════════════════
+   function playMIDINote(note, duration = 400) {
+      // Increased from 250 for cleaner release
       if (!mainSynth || !audioContext) return;
 
       if (audioContext.state === "suspended") {
          audioContext.resume();
       }
 
+      // Send MIDI to MAIN SYNTH ONLY (not drone)
       const midiChannel = 0;
       const midiPort = 0;
-      const velocity = 100;
+      const velocity = 70; // Reduced from 80 for gentler sound
       const currentTime = mainSynth.context.currentTime * 1000;
 
+      // Note On
       const noteOnMessage = [144 + midiChannel, note, velocity];
       const noteOnEvent = new window.RNBO.MIDIEvent(
          currentTime,
          midiPort,
          noteOnMessage,
       );
-      mainSynth.scheduleEvent(noteOnEvent);
+      mainSynth.scheduleEvent(noteOnEvent); // ONLY to mainSynth
 
       const noteOffMessage = [128 + midiChannel, note, 0];
       const noteOffEvent = new window.RNBO.MIDIEvent(
@@ -367,12 +472,29 @@
          midiPort,
          noteOffMessage,
       );
-      mainSynth.scheduleEvent(noteOffEvent);
+      mainSynth.scheduleEvent(noteOffEvent); // ONLY to mainSynth
+
+      console.log(`🎵 Note ${note} (vel ${velocity}, dur ${duration}ms)`);
+   }
+
+   function loadRNBOScript(version) {
+      return new Promise((resolve, reject) => {
+         const el = document.createElement("script");
+         el.src = `/lib/rnbo.min.js`;
+         el.onload = resolve;
+         el.onerror = () => reject(new Error("Failed to load rnbo.js"));
+         document.body.append(el);
+      });
    }
 
    async function initializeMagenta() {
       try {
-         magentaModel = new mm.MusicVAE(
+         if (!window.mm) {
+            console.error("Magenta.js (mm) not loaded");
+            return;
+         }
+
+         magentaModel = new window.mm.MusicVAE(
             "https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/trio_4bar",
          );
          await magentaModel.initialize();
@@ -420,6 +542,31 @@
       if (window.p5Instance) {
          window.p5Instance.updateNotes(newNotes);
       }
+
+      const params = {
+         filterCut: 1000,
+         filterQ: 0.15,
+         filterType: 1,
+         reverbTime: 8,
+         reverbMix: 0.4,
+         setTuning: 0,
+         "poly/envelope/attack": 50,
+         "poly/envelope/decay": 100,
+         "poly/envelope/sustain": 0.5,
+         "poly/envelope/release": 200,
+         "poly/oscillator/mode": Math.floor(Math.random() * 3),
+      };
+
+      applySynthParams(params);
+   }
+
+   function applySynthParams(params) {
+      if (!mainSynth) return;
+
+      Object.entries(params).forEach(([key, value]) => {
+         const p = mainSynth.parametersById.get(key);
+         if (p) p.value = value;
+      });
    }
 
    function loadP5() {
@@ -432,6 +579,8 @@
             const rows = 4;
             const cols = 4;
             const ellipseSize = 100;
+            const xSpacing = canvasSize / (cols + 1);
+            const ySpacing = canvasSize / (rows + 1);
             let ellipseStates = [];
             let midiNotes = [];
 
@@ -443,9 +592,6 @@
                   midiNotes[i][j] = 60;
                }
             }
-
-            const x = xSpacing * (cols - i);
-            const y = ySpacing * (j + 1);
 
             function checkAllOff() {
                for (let i = 0; i < rows; i++) {
@@ -462,7 +608,6 @@
                      "All switches OFF - regenerating notes and shuffling pattern...",
                   );
 
-                  // Generate new notes
                   const newNotes = await generateMelody(16);
                   let idx = 0;
                   for (let i = 0; i < rows; i++) {
@@ -472,7 +617,6 @@
                   }
                   console.log("🎹 Notes regenerated:", midiNotes);
 
-                  // Shuffle pattern randomly
                   const patternIds = [
                      "ripple",
                      "horizontal_lr",
@@ -485,7 +629,6 @@
                      patternIds[Math.floor(Math.random() * patternIds.length)];
                   currentPattern = randomPattern;
 
-                  // Publish pattern change to MQTT
                   if (mqttClient?.connected) {
                      mqttClient.publish("pattern/set", randomPattern);
                   }
@@ -501,7 +644,7 @@
 
                for (let i = 0; i < cols; i++) {
                   for (let j = 0; j < rows; j++) {
-                     const x = xSpacing * (cols - i);
+                     const x = xSpacing * (i + 1);
                      const y = ySpacing * (j + 1);
                      const distance = p.dist(clickedX, clickedY, x, y);
                      ellipsesWithDistance.push({
@@ -541,7 +684,6 @@
             function horizontalDominoLR(clickedRow, clickedCol, newState) {
                let sequence = [];
 
-               // Create sequence in row-major order (left to right, top to bottom)
                for (let j = 0; j < rows; j++) {
                   for (let i = 0; i < cols; i++) {
                      sequence.push({
@@ -552,10 +694,8 @@
                   }
                }
 
-               // Find clicked position in sequence
                const clickedIndex = clickedRow * cols + clickedCol;
 
-               // Rotate sequence to start from clicked position
                const rotatedSequence = [
                   ...sequence.slice(clickedIndex),
                   ...sequence.slice(0, clickedIndex),
@@ -582,7 +722,6 @@
             function horizontalDominoRL(clickedRow, clickedCol, newState) {
                let sequence = [];
 
-               // Create sequence in row-major order (right to left, bottom to top)
                for (let j = rows - 1; j >= 0; j--) {
                   for (let i = cols - 1; i >= 0; i--) {
                      sequence.push({
@@ -593,12 +732,10 @@
                   }
                }
 
-               // Find clicked position in reversed sequence
                const totalSwitches = rows * cols;
                const clickedIndex =
                   totalSwitches - 1 - (clickedRow * cols + clickedCol);
 
-               // Rotate sequence to start from clicked position
                const rotatedSequence = [
                   ...sequence.slice(clickedIndex),
                   ...sequence.slice(0, clickedIndex),
@@ -625,7 +762,6 @@
             function verticalDominoUD(clickedRow, clickedCol, newState) {
                let sequence = [];
 
-               // Create sequence in column-major order (top to bottom, left to right)
                for (let i = 0; i < cols; i++) {
                   for (let j = 0; j < rows; j++) {
                      sequence.push({
@@ -636,10 +772,8 @@
                   }
                }
 
-               // Find clicked position in column-major sequence
                const clickedIndex = clickedCol * rows + clickedRow;
 
-               // Rotate sequence to start from clicked position
                const rotatedSequence = [
                   ...sequence.slice(clickedIndex),
                   ...sequence.slice(0, clickedIndex),
@@ -666,7 +800,6 @@
             function verticalDominoDU(clickedRow, clickedCol, newState) {
                let sequence = [];
 
-               // Create sequence in column-major order (bottom to top, right to left)
                for (let i = cols - 1; i >= 0; i--) {
                   for (let j = rows - 1; j >= 0; j--) {
                      sequence.push({
@@ -677,12 +810,10 @@
                   }
                }
 
-               // Find clicked position in reversed column-major sequence
                const totalSwitches = rows * cols;
                const clickedIndex =
                   totalSwitches - 1 - (clickedCol * rows + clickedRow);
 
-               // Rotate sequence to start from clicked position
                const rotatedSequence = [
                   ...sequence.slice(clickedIndex),
                   ...sequence.slice(0, clickedIndex),
@@ -742,15 +873,46 @@
                return totalDuration + 500;
             }
 
+            function sendDroneNote(note, duration = 800) {
+               if (!droneDevice) return;
+
+               const midiChannel = 1; // keep separate from main synth
+               const midiPort = 0;
+               const velocity = 70; // softer than main synth
+               const now = droneDevice.context.currentTime * 1000;
+
+               // Note-on
+               droneDevice.scheduleEvent(
+                  new window.RNBO.MIDIEvent(now, midiPort, [
+                     144 + midiChannel,
+                     note,
+                     velocity,
+                  ]),
+               );
+
+               // Note-off
+               droneDevice.scheduleEvent(
+                  new window.RNBO.MIDIEvent(now + duration, midiPort, [
+                     128 + midiChannel,
+                     note,
+                     0,
+                  ]),
+               );
+
+               console.log(`🌫 Drone note: ${note}`);
+            }
             function updateSwitch(row, col, state, midiNote) {
                ellipseStates[row][col] = state;
-
-               const switchNum = row * cols + col + 1;
-               publishSwitchCommand(switchNum, state);
-
                if (state) {
-                  playMIDINote(midiNote, 200);
+                  playMIDINote(midiNote); // main synth
+                  sendDroneNote(midiNote); // <-- NEW, drone reacts too
                }
+
+               publishSwitchCommand(row, col, state);
+               publishState(row, col, state, midiNote);
+
+               // Drone is independent - no interaction here
+               // Drone keeps playing in background regardless of switches
             }
 
             function triggerAnimation(row, col, newState) {
@@ -820,9 +982,12 @@
                   if (row >= 0 && row < rows && col >= 0 && col < cols) {
                      ellipseStates[row][col] = state;
                      if (state) {
-                        playMIDINote(midiNotes[row][col], 200);
+                        playMIDINote(midiNotes[row][col], 400); // Clean release
                      }
                   }
+               },
+               getEllipseStates: () => {
+                  return ellipseStates;
                },
             };
 
@@ -846,11 +1011,6 @@
 
             p.draw = () => {
                p.background(255);
-
-               // p.fill(0);
-               // p.textSize(20);
-               // p.textAlign(p.LEFT, p.TOP);
-               // p.text(`Pattern: ${currentPattern}`, 20, 20);
 
                p.textAlign(p.CENTER, p.CENTER);
 
@@ -921,6 +1081,19 @@
                      currentPattern = "random";
                      console.log("Pattern: Random");
                      break;
+                  case " ":
+                     // Toggle drone on/off with spacebar
+                     if (droneDevice) {
+                        const droneOnParam =
+                           droneDevice.parametersById.get("droneOn");
+                        if (droneOnParam) {
+                           droneOnParam.value = droneOnParam.value ? 0 : 1;
+                           console.log(
+                              `Drone: ${droneOnParam.value ? "ON" : "OFF"}`,
+                           );
+                        }
+                     }
+                     break;
                }
             };
          });
@@ -934,7 +1107,7 @@
       setupMQTT();
 
       const magentaScript = document.createElement("script");
-      magentaScript.src = "../lib/magenta.js";
+      magentaScript.src = "/lib/magenta.js";
       magentaScript.onload = async () => {
          console.log("Magenta.js loaded");
          await initializeMagenta();
@@ -954,21 +1127,6 @@
       }
    });
 </script>
-
-<!-- Pattern Selection UI (for debugging) -->
-<!-- <div class="pattern-selector">
-   <div class="pattern-buttons">
-      {#each patterns as pattern}
-         <button
-            class:active={currentPattern === pattern.id}
-            on:click={() => setPattern(pattern.id)}
-            disabled={isAnimating}
-         >
-            {pattern.name}
-         </button>
-      {/each}
-   </div>
-</div> -->
 
 <style>
    :global(html),
@@ -995,54 +1153,5 @@
 
    :global(*::-webkit-scrollbar) {
       display: none;
-   }
-
-   .pattern-selector {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: white;
-      padding: 20px;
-      border-radius: 10px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-      z-index: 1000;
-   }
-
-   .pattern-selector h3 {
-      margin: 0 0 15px 0;
-      font-size: 18px;
-      font-weight: bold;
-   }
-
-   .pattern-buttons {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-   }
-
-   .pattern-buttons button {
-      padding: 12px 20px;
-      border: 2px solid #333;
-      background: white;
-      border-radius: 5px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
-      transition: all 0.2s;
-   }
-
-   .pattern-buttons button:hover:not(:disabled) {
-      background: #f0f0f0;
-      transform: translateY(-2px);
-   }
-
-   .pattern-buttons button.active {
-      background: #333;
-      color: white;
-   }
-
-   .pattern-buttons button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
    }
 </style>
