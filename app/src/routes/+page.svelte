@@ -351,48 +351,16 @@
          const samples = await magentaModel.sample(1, 0.7);
          let notes = samples[0].notes.slice(0, numNotes).map((n) => n.pitch);
 
-         // Define multiple scales
-         const scales = {
-            pentatonic: [48, 50, 52, 55, 57, 60, 62, 64, 67, 69, 72, 74, 76],
-            major: [
-               48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74,
-               76,
-            ],
-            minor: [
-               48, 50, 51, 53, 55, 56, 58, 60, 62, 63, 65, 67, 68, 70, 72, 74,
-               75,
-            ],
-            blues: [48, 51, 53, 54, 55, 58, 60, 63, 65, 66, 67, 70, 72, 75],
-            dorian: [
-               48, 50, 51, 53, 55, 57, 58, 60, 62, 63, 65, 67, 69, 70, 72, 74,
-            ],
-            phrygian: [
-               48, 49, 51, 53, 55, 56, 58, 60, 61, 63, 65, 67, 68, 70, 72, 73,
-            ],
-            wholetone: [
-               48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76,
-            ],
-            chromatic: [
-               48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
-               64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76,
-            ],
-         };
+         const pentatonic = [
+            48, 50, 52, 55, 57, 60, 62, 64, 67, 69, 72, 74, 76,
+         ];
 
-         // Randomly select a scale each time
-         const scaleNames = Object.keys(scales);
-         const selectedScale =
-            scaleNames[Math.floor(Math.random() * scaleNames.length)];
-         const scale = scales[selectedScale];
-
-         console.log(`🎵 Using scale: ${selectedScale}`);
-
-         // Map notes to the selected scale
          notes = notes.map((note) => {
-            return scale.reduce((closest, scaleNote) => {
-               return Math.abs(scaleNote - note) < Math.abs(closest - note)
-                  ? scaleNote
+            return pentatonic.reduce((closest, pNote) => {
+               return Math.abs(pNote - note) < Math.abs(closest - note)
+                  ? pNote
                   : closest;
-            }, scale[0]);
+            }, pentatonic[0]);
          });
 
          return notes;
