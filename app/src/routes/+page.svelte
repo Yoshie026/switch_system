@@ -10,7 +10,6 @@
    let currentPattern = "ripple";
    let isAnimating = false;
    let animationTimeout = null;
-   let currentOscillator = 1;
 
    const patterns = [
       { id: "ripple", name: "Ripple" },
@@ -63,7 +62,7 @@
 
          if (topic === "switch/master") {
             const isOn = msg.toLowerCase() === "on" || msg === "1";
-            console.log(`Master switch: ${isOn ? "ON" : "OFF"}`);
+            console.log(`🔘 Master switch: ${isOn ? "ON" : "OFF"}`);
             handleMasterSwitch(isOn);
          }
       });
@@ -299,17 +298,6 @@
       });
    }
 
-   function setOscillatorMode(mode) {
-      if (!mainSynth) return;
-
-      const param = mainSynth.parametersById.get("poly/oscillator/mode");
-      if (param) {
-         param.value = mode;
-         currentOscillator = mode;
-         console.log(`🎛️ Oscillator mode set to: ${mode}`);
-      }
-   }
-
    function playMIDINote(note, duration = 250) {
       if (!mainSynth || !audioContext) return;
 
@@ -471,10 +459,6 @@
                      }
                   }
                   console.log("🎹 Notes regenerated:", midiNotes);
-
-                  // Randomize oscillator mode (1-4)
-                  const randomOsc = Math.floor(Math.random() * 4) + 1;
-                  setOscillatorMode(randomOsc);
 
                   // Shuffle pattern randomly
                   const patternIds = [
@@ -763,17 +747,6 @@
                }
 
                isAnimating = true;
-
-               // Set oscillator based on state change
-               if (newState) {
-                  // OFF → ON: use oscillator 0
-                  setOscillatorMode(0);
-               } else {
-                  // ON → OFF: randomize oscillator 1-4
-                  const randomOsc = Math.floor(Math.random() * 4) + 1;
-                  setOscillatorMode(randomOsc);
-               }
-
                publishState(row, col, newState, midiNotes[row][col]);
 
                let duration = 5000;
