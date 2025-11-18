@@ -246,7 +246,7 @@
       console.log("\nSETTING UP DRONE...");
 
       const droneParams = {
-         volume: 8, // Increased for better presence
+         volume: 0.8, // Increased for better presence
          droneOn: 1,
          droneFilterType: 0, // Lowpass
          droneFilterCut: 800, // Warmer, darker (was 1200)
