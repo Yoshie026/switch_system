@@ -10,9 +10,7 @@
    let currentPattern = "ripple";
    let isAnimating = false;
    let animationTimeout = null;
-
-   let droneNotes = [48, 52, 55, 60, 64, 67]; // Pure C major chord
-   let droneActive = false;
+   let currentOscillator = 1;
 
    const patterns = [
       { id: "ripple", name: "Ripple" },
@@ -23,50 +21,62 @@
       { id: "random", name: "Random" },
    ];
 
-   function setupMQTT() {
-      try {
-         mqttClient = mqtt.connect("ws://localhost:9001");
-
-         mqttClient.on("connect", () => {
-            console.log("MQTT Connected");
-            mqttClient.subscribe("switch/+");
-            mqttClient.subscribe("switch/master");
-            mqttClient.subscribe("pattern/set");
-            mqttClient.subscribe("switch/regenerate");
-         });
-
-         mqttClient.on("message", (topic, message) => {
-            const msg = message.toString();
-            const switchMatch = topic.match(/^switch\/(\d+)$/);
-            if (switchMatch) {
-               const switchNum = parseInt(switchMatch[1]);
-               const state = msg.toLowerCase() === "on" || msg === "1";
-               handlePhysicalSwitchUpdate(switchNum, state);
-            }
-
-            if (topic === "pattern/set") {
-               currentPattern = msg.toLowerCase();
-            }
-
-            if (topic === "switch/regenerate") {
-               regenerateMelody();
-            }
-
-            if (topic === "switch/master") {
-               const isOn = msg.toLowerCase() === "on" || msg === "1";
-               handleMasterSwitch(isOn);
-            }
-         });
-
-         mqttClient.on("error", (err) => {
-            console.error("MQTT Error:", err);
-         });
-      } catch (err) {
-         console.error("MQTT setup failed:", err);
+   function setPattern(patternId) {
+      currentPattern = patternId;
+      if (mqttClient?.connected) {
+         mqttClient.publish("pattern/set", patternId);
       }
+      console.log(`Pattern set to: ${patternId}`);
+   }
+
+   function setupMQTT() {
+      mqttClient = mqtt.connect("ws://localhost:9001");
+
+      mqttClient.on("connect", () => {
+         console.log("MQTT Connected");
+
+         mqttClient.subscribe("switch/+");
+         mqttClient.subscribe("switch/master");
+         mqttClient.subscribe("pattern/set");
+         mqttClient.subscribe("switch/regenerate");
+      });
+
+      mqttClient.on("message", (topic, message) => {
+         const msg = message.toString();
+         console.log(`${topic}: ${msg}`);
+
+         const switchMatch = topic.match(/^switch\/(\d+)$/);
+         if (switchMatch) {
+            const switchNum = parseInt(switchMatch[1]);
+            const state = msg.toLowerCase() === "on" || msg === "1";
+            handlePhysicalSwitchUpdate(switchNum, state);
+         }
+
+         if (topic === "pattern/set") {
+            currentPattern = msg.toLowerCase();
+            console.log(`Pattern changed to: ${currentPattern}`);
+         }
+
+         if (topic === "switch/regenerate") {
+            regenerateMelody();
+         }
+
+         if (topic === "switch/master") {
+            const isOn = msg.toLowerCase() === "on" || msg === "1";
+            console.log(`Master switch: ${isOn ? "ON" : "OFF"}`);
+            handleMasterSwitch(isOn);
+         }
+      });
+
+      mqttClient.on("error", (err) => {
+         console.error("MQTT Error:", err);
+      });
    }
 
    function handlePhysicalSwitchUpdate(switchNum, state) {
+      console.log(
+         `Physical switch ${switchNum} is now ${state ? "ON" : "OFF"}`,
+      );
       const row = Math.floor((switchNum - 1) / 4);
       const col = (switchNum - 1) % 4;
       const flippedCol = 3 - col;
@@ -75,54 +85,102 @@
       }
    }
 
-   function handleMasterSwitch(isOn) {
-      if (!window.p5Instance || isAnimating) return;
-      isAnimating = true;
+   function timerForIdling() {
+      // 1) choose random time 200-450 sec
+      const min = 200;
+      const max = 450;
+      const rand = Math.floor(Math.random() * (max - min + 1) + min);
 
-      const sequence = [];
-      const rows = 4;
-      const cols = 4;
-
-      if (isOn) {
-         for (let i = 0; i < cols; i++) {
-            for (let j = 0; j < rows; j++) {
-               sequence.push({ row: j, col: i });
-            }
+      setTimeout(() => {
+         // SAFETY GUARDS
+         if (!window.p5Instance) {
+            console.log("Idling: p5 not ready");
+            timerForIdling();
+            return;
          }
-      } else {
-         for (let i = cols - 1; i >= 0; i--) {
-            for (let j = rows - 1; j >= 0; j--) {
-               sequence.push({ row: j, col: i });
-            }
+         if (isAnimating) {
+            console.log("Idling: animation in progress, skipping");
+            timerForIdling();
+            return;
          }
-      }
 
-      sequence.forEach((item, index) => {
-         setTimeout(() => {
-            window.p5Instance.triggerAnimation(item.row, item.col, isOn);
-            if (index === sequence.length - 1) {
-               setTimeout(() => {
-                  isAnimating = false;
-               }, 500);
+         // 2) Check if all ellipses are off
+         const allOff = (() => {
+            const grid = window.p5Instance.getEllipseStates?.();
+            if (!grid) return false;
+            for (let r = 0; r < 4; r++) {
+               for (let c = 0; c < 4; c++) {
+                  if (grid[r][c]) return false;
+               }
             }
-         }, index * 150);
-      });
+            return true;
+         })();
+
+         if (!allOff) {
+            console.log("Idling: some switches ON, skipping");
+            timerForIdling();
+            return;
+         }
+
+         console.log("Idle detected. triggering idle animation...");
+
+         // 3) Select a random cell (row, col)
+         const row = Math.floor(Math.random() * 4);
+         const col = Math.floor(Math.random() * 4);
+
+         // 4) Choose a random pattern
+         const patternList = [
+            "ripple",
+            "horizontal_lr",
+            "horizontal_rl",
+            "vertical_ud",
+            "vertical_du",
+            "random",
+         ];
+         const chosenPattern =
+            patternList[Math.floor(Math.random() * patternList.length)];
+
+         currentPattern = chosenPattern;
+         console.log(`🌙 Idle pattern selected: ${chosenPattern}`);
+
+         // Reflect pattern physically
+         if (mqttClient?.connected) {
+            mqttClient.publish("pattern/set", chosenPattern);
+         }
+
+         // 5) Trigger ON → animation
+         window.p5Instance.triggerAnimation(row, col, true);
+
+         // restart timer for next idle
+         timerForIdling();
+      }, rand * 1000);
    }
 
    function publishSwitchCommand(row, col, state) {
-      const flippedCol = 3 - col;
+      const flippedCol = 3 - col; // horizontal mirror
       const switchNum = row * 4 + flippedCol + 1;
-      if (mqttClient?.connected) {
-         mqttClient.publish(`switch/${switchNum}`, state ? "ON" : "OFF");
-      }
+      mqttClient.publish(`switch/${switchNum}`, state ? "ON" : "OFF");
    }
 
    function publishState(row, col, state, note) {
       if (mqttClient?.connected) {
          mqttClient.publish(
             "switch/state",
-            JSON.stringify({ row, col, state, note, timestamp: Date.now() }),
+            JSON.stringify({
+               row,
+               col,
+               state,
+               note,
+               timestamp: Date.now(),
+            }),
          );
+      }
+   }
+
+   function publishMasterState(isOn) {
+      if (mqttClient?.connected) {
+         mqttClient.publish("switch/master", isOn ? "ON" : "OFF");
+         console.log(`Published master ${isOn ? "ON" : "OFF"}`);
       }
    }
 
@@ -134,18 +192,12 @@
       const droneGain = audioContext.createGain();
       const masterGain = audioContext.createGain();
 
-      mainGain.gain.value = 0.8;
-      droneGain.gain.value = 0.1;
-      masterGain.gain.value = 1.0;
+      mainGain.gain.value = 0.7;
+      droneGain.gain.value = 0.3;
 
       mainGain.connect(masterGain);
       droneGain.connect(masterGain);
       masterGain.connect(audioContext.destination);
-
-      console.log("\nGAIN SETUP:");
-      console.log("   Main: " + mainGain.gain.value);
-      console.log("   Drone: " + droneGain.gain.value);
-      console.log("   Master: " + masterGain.gain.value);
 
       try {
          const synthResponse = await fetch("/export/synth.export.json");
@@ -176,21 +228,7 @@
          mainSynth.node.connect(mainGain);
          droneDevice.node.connect(droneGain);
 
-         console.log("\nRNBO devices created");
-
-         console.log("\nMAIN SYNTH PARAMETERS:");
-         mainSynth.parameters.forEach((param) => {
-            console.log(
-               `   - ${param.id}: ${param.value} [${param.min} to ${param.max}]`,
-            );
-         });
-
-         console.log("\nDRONE PARAMETERS:");
-         droneDevice.parameters.forEach((param) => {
-            console.log(
-               `   - ${param.id}: ${param.value} [${param.min} to ${param.max}]`,
-            );
-         });
+         console.log("RNBO devices loaded");
 
          setupMainSynth();
          setupDrone();
@@ -199,119 +237,90 @@
       }
    }
 
-   function setupMainSynth() {
-      if (!mainSynth) {
-         console.error("mainSynth is null!");
-         return;
-      }
+   function setupDrone() {
+      if (!droneDevice) return;
 
-      console.log("\nSETTING UP MAIN SYNTH...");
+      try {
+         const droneOnParam = droneDevice.parametersById.get("droneOn");
+         if (droneOnParam) {
+            droneOnParam.value = 1;
+            console.log("droneOn = 1");
+         }
+
+         const midiPort = 0;
+         const note = 48;
+         const velocity = 100;
+         const currentTime = droneDevice.context.currentTime * 1000;
+
+         const noteOn = [144, note, velocity];
+         droneDevice.scheduleEvent(
+            new window.RNBO.MIDIEvent(currentTime, midiPort, noteOn),
+         );
+
+         console.log("Drone started");
+      } catch (err) {
+         console.error("Drone setup error:", err);
+      }
+   }
+
+   function loadRNBOScript(version) {
+      return new Promise((resolve, reject) => {
+         const el = document.createElement("script");
+         el.src = `../lib/rnbo.min.js`;
+         el.onload = resolve;
+         el.onerror = () => reject(new Error("Failed to load rnbo.js"));
+         document.body.append(el);
+      });
+   }
+
+   function setupMainSynth() {
+      if (!mainSynth) return;
 
       const params = {
-         filterCut: 1200,
-         filterQ: 0.2,
-         filterType: 0,
-         reverbTime: 10,
-         reverbMix: 0.3,
-         setTuning: 0,
-         "poly/envelope/attack": 30,
-         "poly/envelope/decay": 150,
-         "poly/envelope/sustain": 0.6,
-         "poly/envelope/release": 800,
+         filterCut: 1000,
+         filterQ: 0.1,
+         reverbTime: 3,
+         reverbMix: 0.5,
+         filterType: 2,
+         "poly/envelope/attack": 200,
+         "poly/envelope/decay": 200,
+         "poly/envelope/sustain": 0,
+         "poly/envelope/release": 1000,
          "poly/oscillator/mode": 1,
-         "poly/delay/left_delay": 250,
-         "poly/delay/fb": 0.15,
-         "poly/delay/right_delay": 350,
+         "poly/delay/fb": 0.75,
       };
 
       Object.entries(params).forEach(([key, value]) => {
          const param = mainSynth.parametersById.get(key);
          if (param) {
             param.value = value;
-            console.log(`   ${key} = ${value}`);
-         } else {
-            console.warn(`   NOT FOUND: ${key}`);
+            console.log(`Main synth: ${key} = ${value}`);
          }
       });
-
-      console.log("Main synth setup complete");
    }
 
-   function setupDrone() {
-      if (!droneDevice) {
-         console.error("droneDevice is null!");
-         return;
+   function setOscillatorMode(mode) {
+      if (!mainSynth) return;
+
+      const param = mainSynth.parametersById.get("poly/oscillator/mode");
+      if (param) {
+         param.value = mode;
+         currentOscillator = mode;
+         console.log(`🎛️ Oscillator mode set to: ${mode}`);
       }
-
-      console.log("\nSETTING UP DRONE...");
-
-      const droneParams = {
-         volume: 1, // Increased for better presence
-         droneOn: 1,
-         droneFilterType: 0,
-         droneFilterCut: 800,
-         droneFilterQ: 0.3,
-         harmonics: 1.5,
-         overblow: 0.4,
-         fluctuate: 0.005,
-         reverbMix: 0.6,
-         reverb_decay: 8,
-         reverb_rotate: 0.3,
-         damping: 0.75,
-      };
-
-      Object.entries(droneParams).forEach(([key, value]) => {
-         const param = droneDevice.parametersById.get(key);
-         if (param) {
-            param.value = value;
-            console.log(`   ${key} = ${value}`);
-         } else {
-            console.warn(`   NOT FOUND: ${key}`);
-         }
-      });
-
-      const midiPort = 0;
-      const velocity = 50;
-      const currentTime = droneDevice.context.currentTime * 1000;
-
-      console.log("\nStarting drone: C major chord (C3, E3, G3, C4, E4, G4)");
-      console.log("Notes: " + droneNotes.join(", "));
-
-      droneNotes.forEach((note) => {
-         const noteOn = [144, note, velocity];
-         droneDevice.scheduleEvent(
-            new window.RNBO.MIDIEvent(currentTime, midiPort, noteOn),
-         );
-      });
-
-      droneActive = true;
-      console.log("Drone started");
    }
 
-   function playMIDINote(note, duration = 500) {
-      if (!mainSynth) {
-         console.error("Cannot play - mainSynth is null");
-         return;
-      }
-
-      if (!audioContext) {
-         console.error("Cannot play - audioContext is null");
-         return;
-      }
+   function playMIDINote(note, duration = 250) {
+      if (!mainSynth || !audioContext) return;
 
       if (audioContext.state === "suspended") {
          audioContext.resume();
-         console.log("Audio context resumed");
       }
 
       const midiChannel = 0;
       const midiPort = 0;
       const velocity = 100;
-      const currentTime = audioContext.currentTime * 1000;
-
-      console.log(
-         `NOTE ${note}: vel=${velocity}, dur=${duration}ms, state=${audioContext.state}`,
-      );
+      const currentTime = mainSynth.context.currentTime * 1000;
 
       const noteOnMessage = [144 + midiChannel, note, velocity];
       const noteOnEvent = new window.RNBO.MIDIEvent(
@@ -330,24 +339,9 @@
       mainSynth.scheduleEvent(noteOffEvent);
    }
 
-   function loadRNBOScript(version) {
-      return new Promise((resolve, reject) => {
-         const el = document.createElement("script");
-         el.src = `/lib/rnbo.min.js`;
-         el.onload = resolve;
-         el.onerror = () => reject(new Error("Failed to load rnbo.js"));
-         document.body.append(el);
-      });
-   }
-
    async function initializeMagenta() {
       try {
-         if (!window.mm) {
-            console.error("Magenta.js (mm) not loaded");
-            return;
-         }
-
-         magentaModel = new window.mm.MusicVAE(
+         magentaModel = new mm.MusicVAE(
             "https://storage.googleapis.com/magentadata/js/checkpoints/music_vae/trio_4bar",
          );
          await magentaModel.initialize();
@@ -359,6 +353,7 @@
 
    async function generateMelody(numNotes = 16) {
       if (!magentaModel) {
+         console.warn("Model not ready, using random notes");
          return Array(numNotes)
             .fill()
             .map(() => Math.floor(Math.random() * 37) + 48);
@@ -368,16 +363,48 @@
          const samples = await magentaModel.sample(1, 0.7);
          let notes = samples[0].notes.slice(0, numNotes).map((n) => n.pitch);
 
-         const pentatonic = [
-            48, 50, 52, 55, 57, 60, 62, 64, 67, 69, 72, 74, 76,
-         ];
+         // Define multiple scales
+         const scales = {
+            pentatonic: [48, 50, 52, 55, 57, 60, 62, 64, 67, 69, 72, 74, 76],
+            major: [
+               48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74,
+               76,
+            ],
+            minor: [
+               48, 50, 51, 53, 55, 56, 58, 60, 62, 63, 65, 67, 68, 70, 72, 74,
+               75,
+            ],
+            blues: [48, 51, 53, 54, 55, 58, 60, 63, 65, 66, 67, 70, 72, 75],
+            dorian: [
+               48, 50, 51, 53, 55, 57, 58, 60, 62, 63, 65, 67, 69, 70, 72, 74,
+            ],
+            phrygian: [
+               48, 49, 51, 53, 55, 56, 58, 60, 61, 63, 65, 67, 68, 70, 72, 73,
+            ],
+            wholetone: [
+               48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76,
+            ],
+            chromatic: [
+               48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+               64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76,
+            ],
+         };
 
+         // Randomly select a scale each time
+         const scaleNames = Object.keys(scales);
+         const selectedScale =
+            scaleNames[Math.floor(Math.random() * scaleNames.length)];
+         const scale = scales[selectedScale];
+
+         console.log(`🎵 Using scale: ${selectedScale}`);
+
+         // Map notes to the selected scale
          notes = notes.map((note) => {
-            return pentatonic.reduce((closest, pNote) => {
-               return Math.abs(pNote - note) < Math.abs(closest - note)
-                  ? pNote
+            return scale.reduce((closest, scaleNote) => {
+               return Math.abs(scaleNote - note) < Math.abs(closest - note)
+                  ? scaleNote
                   : closest;
-            }, pentatonic[0]);
+            }, scale[0]);
          });
 
          return notes;
@@ -431,6 +458,11 @@
 
             async function regenerateNotes() {
                if (checkAllOff()) {
+                  console.log(
+                     "All switches OFF - regenerating notes and shuffling pattern...",
+                  );
+
+                  // Generate new notes
                   const newNotes = await generateMelody(16);
                   let idx = 0;
                   for (let i = 0; i < rows; i++) {
@@ -438,80 +470,32 @@
                         midiNotes[i][j] = newNotes[idx++] || 60;
                      }
                   }
+                  console.log("🎹 Notes regenerated:", midiNotes);
 
-                  console.log("Notes regenerated");
-                  addNoteToDrone();
+                  // Randomize oscillator mode (1-4)
+                  const randomOsc = Math.floor(Math.random() * 4) + 1;
+                  setOscillatorMode(randomOsc);
+
+                  // Shuffle pattern randomly
+                  const patternIds = [
+                     "ripple",
+                     "horizontal_lr",
+                     "horizontal_rl",
+                     "vertical_ud",
+                     "vertical_du",
+                     "random",
+                  ];
+                  const randomPattern =
+                     patternIds[Math.floor(Math.random() * patternIds.length)];
+                  currentPattern = randomPattern;
+
+                  // Publish pattern change to MQTT
+                  if (mqttClient?.connected) {
+                     mqttClient.publish("pattern/set", randomPattern);
+                  }
+
+                  console.log(`Pattern shuffled to: ${randomPattern}`);
                }
-            }
-
-            function addNoteToDrone() {
-               if (!droneDevice) return;
-
-               // Pure C major chord notes only (C, E, G across octaves)
-               const availableNotes = [
-                  36, 40, 43, 48, 52, 55, 60, 64, 67, 72, 76, 79,
-                  // C2, E2, G2, C3, E3, G3, C4, E4, G4, C5, E5, G5
-               ];
-
-               const unusedNotes = availableNotes.filter(
-                  (note) => !droneNotes.includes(note),
-               );
-
-               if (unusedNotes.length === 0) {
-                  console.log("DRONE: All notes already playing (max reached)");
-                  return;
-               }
-
-               const newNote =
-                  unusedNotes[Math.floor(Math.random() * unusedNotes.length)];
-               droneNotes.push(newNote);
-
-               const midiPort = 0;
-               const velocity = 50;
-               const currentTime = droneDevice.context.currentTime * 1000;
-
-               const noteOn = [144, newNote, velocity];
-               droneDevice.scheduleEvent(
-                  new window.RNBO.MIDIEvent(currentTime, midiPort, noteOn),
-               );
-
-               console.log(
-                  `DRONE: Added note ${newNote} (now playing ${droneNotes.length} notes: ${droneNotes.join(", ")})`,
-               );
-            }
-
-            function resetDrone() {
-               if (!droneDevice) return;
-
-               const midiPort = 0;
-               const currentTime = droneDevice.context.currentTime * 1000;
-
-               droneNotes.forEach((note) => {
-                  const noteOff = [128, note, 0];
-                  droneDevice.scheduleEvent(
-                     new window.RNBO.MIDIEvent(currentTime, midiPort, noteOff),
-                  );
-               });
-
-               console.log(`DRONE: Stopped ${droneNotes.length} notes`);
-
-               droneNotes = [48, 52, 55, 60, 64, 67]; // Pure C major chord
-
-               const velocity = 50;
-               droneNotes.forEach((note) => {
-                  const noteOn = [144, note, velocity];
-                  droneDevice.scheduleEvent(
-                     new window.RNBO.MIDIEvent(
-                        currentTime + 50,
-                        midiPort,
-                        noteOn,
-                     ),
-                  );
-               });
-
-               console.log(
-                  `DRONE: Reset to original (${droneNotes.length} notes): ${droneNotes.join(", ")}`,
-               );
             }
 
             function ripplePattern(clickedRow, clickedCol, newState) {
@@ -535,6 +519,8 @@
 
                ellipsesWithDistance.sort((a, b) => a.distance - b.distance);
 
+               const totalDuration = ellipsesWithDistance.length * 300;
+
                ellipsesWithDistance.forEach((ellipse, index) => {
                   setTimeout(() => {
                      updateSwitch(
@@ -543,6 +529,7 @@
                         newState,
                         ellipse.midiNote,
                      );
+
                      if (index === ellipsesWithDistance.length - 1) {
                         setTimeout(() => {
                            isAnimating = false;
@@ -552,33 +539,277 @@
                   }, index * 300);
                });
 
-               return ellipsesWithDistance.length * 300 + 500;
+               return totalDuration + 500;
+            }
+
+            function horizontalDominoLR(clickedRow, clickedCol, newState) {
+               let sequence = [];
+
+               // Create sequence in row-major order (left to right, top to bottom)
+               for (let j = 0; j < rows; j++) {
+                  for (let i = 0; i < cols; i++) {
+                     sequence.push({
+                        row: j,
+                        col: i,
+                        midiNote: midiNotes[j][i],
+                     });
+                  }
+               }
+
+               // Find clicked position in sequence
+               const clickedIndex = clickedRow * cols + clickedCol;
+
+               // Rotate sequence to start from clicked position
+               const rotatedSequence = [
+                  ...sequence.slice(clickedIndex),
+                  ...sequence.slice(0, clickedIndex),
+               ];
+
+               const totalDuration = rotatedSequence.length * 150;
+
+               rotatedSequence.forEach((item, index) => {
+                  setTimeout(() => {
+                     updateSwitch(item.row, item.col, newState, item.midiNote);
+
+                     if (index === rotatedSequence.length - 1) {
+                        setTimeout(() => {
+                           isAnimating = false;
+                           regenerateNotes();
+                        }, 500);
+                     }
+                  }, index * 300);
+               });
+
+               return totalDuration + 500;
+            }
+
+            function horizontalDominoRL(clickedRow, clickedCol, newState) {
+               let sequence = [];
+
+               // Create sequence in row-major order (right to left, bottom to top)
+               for (let j = rows - 1; j >= 0; j--) {
+                  for (let i = cols - 1; i >= 0; i--) {
+                     sequence.push({
+                        row: j,
+                        col: i,
+                        midiNote: midiNotes[j][i],
+                     });
+                  }
+               }
+
+               // Find clicked position in reversed sequence
+               const totalSwitches = rows * cols;
+               const clickedIndex =
+                  totalSwitches - 1 - (clickedRow * cols + clickedCol);
+
+               // Rotate sequence to start from clicked position
+               const rotatedSequence = [
+                  ...sequence.slice(clickedIndex),
+                  ...sequence.slice(0, clickedIndex),
+               ];
+
+               const totalDuration = rotatedSequence.length * 150;
+
+               rotatedSequence.forEach((item, index) => {
+                  setTimeout(() => {
+                     updateSwitch(item.row, item.col, newState, item.midiNote);
+
+                     if (index === rotatedSequence.length - 1) {
+                        setTimeout(() => {
+                           isAnimating = false;
+                           regenerateNotes();
+                        }, 500);
+                     }
+                  }, index * 300);
+               });
+
+               return totalDuration + 500;
+            }
+
+            function verticalDominoUD(clickedRow, clickedCol, newState) {
+               let sequence = [];
+
+               // Create sequence in column-major order (top to bottom, left to right)
+               for (let i = 0; i < cols; i++) {
+                  for (let j = 0; j < rows; j++) {
+                     sequence.push({
+                        row: j,
+                        col: i,
+                        midiNote: midiNotes[j][i],
+                     });
+                  }
+               }
+
+               // Find clicked position in column-major sequence
+               const clickedIndex = clickedCol * rows + clickedRow;
+
+               // Rotate sequence to start from clicked position
+               const rotatedSequence = [
+                  ...sequence.slice(clickedIndex),
+                  ...sequence.slice(0, clickedIndex),
+               ];
+
+               const totalDuration = rotatedSequence.length * 150;
+
+               rotatedSequence.forEach((item, index) => {
+                  setTimeout(() => {
+                     updateSwitch(item.row, item.col, newState, item.midiNote);
+
+                     if (index === rotatedSequence.length - 1) {
+                        setTimeout(() => {
+                           isAnimating = false;
+                           regenerateNotes();
+                        }, 500);
+                     }
+                  }, index * 300);
+               });
+
+               return totalDuration + 500;
+            }
+
+            function verticalDominoDU(clickedRow, clickedCol, newState) {
+               let sequence = [];
+
+               // Create sequence in column-major order (bottom to top, right to left)
+               for (let i = cols - 1; i >= 0; i--) {
+                  for (let j = rows - 1; j >= 0; j--) {
+                     sequence.push({
+                        row: j,
+                        col: i,
+                        midiNote: midiNotes[j][i],
+                     });
+                  }
+               }
+
+               // Find clicked position in reversed column-major sequence
+               const totalSwitches = rows * cols;
+               const clickedIndex =
+                  totalSwitches - 1 - (clickedCol * rows + clickedRow);
+
+               // Rotate sequence to start from clicked position
+               const rotatedSequence = [
+                  ...sequence.slice(clickedIndex),
+                  ...sequence.slice(0, clickedIndex),
+               ];
+
+               const totalDuration = rotatedSequence.length * 150;
+
+               rotatedSequence.forEach((item, index) => {
+                  setTimeout(() => {
+                     updateSwitch(item.row, item.col, newState, item.midiNote);
+
+                     if (index === rotatedSequence.length - 1) {
+                        setTimeout(() => {
+                           isAnimating = false;
+                           regenerateNotes();
+                        }, 500);
+                     }
+                  }, index * 500);
+               });
+
+               return totalDuration + 500;
+            }
+
+            function randomPattern(clickedRow, clickedCol, newState) {
+               let sequence = [];
+
+               for (let i = 0; i < cols; i++) {
+                  for (let j = 0; j < rows; j++) {
+                     sequence.push({
+                        row: j,
+                        col: i,
+                        midiNote: midiNotes[j][i],
+                     });
+                  }
+               }
+
+               for (let i = sequence.length - 1; i > 0; i--) {
+                  const j = Math.floor(Math.random() * (i + 1));
+                  [sequence[i], sequence[j]] = [sequence[j], sequence[i]];
+               }
+
+               const totalDuration = sequence.length * 100;
+
+               sequence.forEach((item, index) => {
+                  setTimeout(() => {
+                     updateSwitch(item.row, item.col, newState, item.midiNote);
+
+                     if (index === sequence.length - 1) {
+                        setTimeout(() => {
+                           isAnimating = false;
+                           regenerateNotes();
+                        }, 500);
+                     }
+                  }, index * 500);
+               });
+
+               return totalDuration + 500;
             }
 
             function updateSwitch(row, col, state, midiNote) {
                ellipseStates[row][col] = state;
 
-               if (state) {
-                  console.log(`Switch [${row},${col}] ON -> note ${midiNote}`);
-                  playMIDINote(midiNote, 500);
-               }
-
                publishSwitchCommand(row, col, state);
-               publishState(row, col, state, midiNote);
+
+               if (state) {
+                  playMIDINote(midiNote, 200);
+               }
             }
 
             function triggerAnimation(row, col, newState) {
                if (isAnimating) {
+                  console.log("Animation in progress - ignoring input");
                   return;
                }
 
                isAnimating = true;
-               const duration = ripplePattern(row, col, newState);
+
+               // Set oscillator based on state change
+               if (newState) {
+                  // OFF → ON: use oscillator 0
+                  setOscillatorMode(0);
+               } else {
+                  // ON → OFF: randomize oscillator 1-4
+                  const randomOsc = Math.floor(Math.random() * 4) + 1;
+                  setOscillatorMode(randomOsc);
+               }
+
+               publishState(row, col, newState, midiNotes[row][col]);
+
+               let duration = 5000;
+
+               switch (currentPattern) {
+                  case "ripple":
+                     duration = ripplePattern(row, col, newState);
+                     break;
+                  case "horizontal_lr":
+                  case "domino_lr":
+                     duration = horizontalDominoLR(row, col, newState);
+                     break;
+                  case "horizontal_rl":
+                  case "domino_rl":
+                     duration = horizontalDominoRL(row, col, newState);
+                     break;
+                  case "vertical_ud":
+                  case "domino_ud":
+                     duration = verticalDominoUD(row, col, newState);
+                     break;
+                  case "vertical_du":
+                  case "domino_du":
+                     duration = verticalDominoDU(row, col, newState);
+                     break;
+                  case "random":
+                     duration = randomPattern(row, col, newState);
+                     break;
+                  default:
+                     duration = ripplePattern(row, col, newState);
+               }
 
                if (animationTimeout) clearTimeout(animationTimeout);
                animationTimeout = setTimeout(
                   () => {
                      isAnimating = false;
+                     console.log("Animation lock released (failsafe)");
                   },
                   Math.max(duration, 5000),
                );
@@ -597,11 +828,23 @@
                         midiNotes[i][j] = newNotes[idx++] || 60;
                      }
                   }
+                  console.log("Notes updated via MQTT");
                },
-               getEllipseStates: () => ellipseStates,
+               updateSwitchState: (row, col, state) => {
+                  if (row >= 0 && row < rows && col >= 0 && col < cols) {
+                     ellipseStates[row][col] = state;
+                     if (state) {
+                        playMIDINote(midiNotes[row][col], 200);
+                     }
+                  }
+               },
+               getEllipseStates: () => {
+                  return ellipseStates;
+               },
             };
 
             generateMelody(rows * cols).then((generatedNotes) => {
+               console.log("Generated notes:", generatedNotes);
                let noteIndex = 0;
                for (let i = 0; i < rows; i++) {
                   for (let j = 0; j < cols; j++) {
@@ -609,6 +852,7 @@
                      noteIndex++;
                   }
                }
+               console.log("🎹 Final grid:", midiNotes);
             });
 
             p.setup = () => {
@@ -619,6 +863,9 @@
 
             p.draw = () => {
                p.background(255);
+
+               p.textAlign(p.CENTER, p.CENTER);
+
                for (let i = 0; i < cols; i++) {
                   for (let j = 0; j < rows; j++) {
                      const x = xSpacing * (i + 1);
@@ -638,11 +885,14 @@
             p.mousePressed = () => {
                if (audioContext?.state === "suspended") {
                   audioContext.resume().then(() => {
-                     console.log("Audio context resumed");
+                     console.log("Audio started");
                   });
                }
 
-               if (isAnimating) return;
+               if (isAnimating) {
+                  console.log("Animation locked - cannot click");
+                  return;
+               }
 
                for (let i = 0; i < cols; i++) {
                   for (let j = 0; j < rows; j++) {
@@ -658,27 +908,31 @@
             };
 
             p.keyPressed = () => {
-               if (p.key === " ") {
-                  console.log("\nSPACEBAR TEST");
-                  playMIDINote(60, 1000);
-               }
-               if (p.key === "d" || p.key === "D") {
-                  if (droneDevice) {
-                     const param = droneDevice.parametersById.get("droneOn");
-                     if (param) {
-                        param.value = param.value ? 0 : 1;
-                        console.log(`DRONE: ${param.value ? "ON" : "OFF"}`);
-                     }
-                  }
-               }
-               if (p.key === "r" || p.key === "R") {
-                  console.log("\nRESETTING DRONE...");
-                  resetDrone();
-               }
-               if (p.key === "l" || p.key === "L") {
-                  console.log(
-                     `\nDRONE: Current notes (${droneNotes.length}): ${droneNotes.join(", ")}`,
-                  );
+               switch (p.key) {
+                  case "1":
+                     currentPattern = "ripple";
+                     console.log("Pattern: Ripple");
+                     break;
+                  case "2":
+                     currentPattern = "horizontal_lr";
+                     console.log("Pattern: Horizontal L→R");
+                     break;
+                  case "3":
+                     currentPattern = "horizontal_rl";
+                     console.log("Pattern: Horizontal R→L");
+                     break;
+                  case "4":
+                     currentPattern = "vertical_ud";
+                     console.log("Pattern: Vertical U→D");
+                     break;
+                  case "5":
+                     currentPattern = "vertical_du";
+                     console.log("Pattern: Vertical D→U");
+                     break;
+                  case "6":
+                     currentPattern = "random";
+                     console.log("Pattern: Random");
+                     break;
                }
             };
          });
@@ -688,27 +942,17 @@
    }
 
    onMount(() => {
-      console.log("\nSTARTING...\n");
       setupRNBO();
       setupMQTT();
 
       const magentaScript = document.createElement("script");
-      magentaScript.src = "/lib/magenta.js";
+      magentaScript.src = "../lib/magenta.js";
       magentaScript.onload = async () => {
+         console.log("Magenta.js loaded");
          await initializeMagenta();
+         console.log("Magenta model ready");
          loadP5();
-         console.log("\nREADY\n");
-         console.log("CONTROLS:");
-         console.log("   SPACEBAR = Test synth note");
-         console.log("   D = Toggle drone on/off");
-         console.log("   R = Reset drone to original notes");
-         console.log("   L = List current drone notes");
-         console.log("   Click = Trigger animation");
-         console.log("\nDRONE EVOLUTION:");
-         console.log("   - Starts with 6 notes (pure C major chord)");
-         console.log("   - Adds 1 random major chord note each regeneration");
-         console.log("   -Max 12 different notes");
-         console.log("   - Press R to reset anytime\n");
+         timerForIdling();
       };
       document.body.appendChild(magentaScript);
    });
@@ -716,6 +960,7 @@
    onDestroy(() => {
       if (mqttClient) {
          mqttClient.end();
+         console.log("MQTT disconnected");
       }
       if (animationTimeout) {
          clearTimeout(animationTimeout);
@@ -739,5 +984,14 @@
       justify-content: center;
       align-items: center;
       background: #f0f0f0;
+   }
+
+   :global(*) {
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+   }
+
+   :global(*::-webkit-scrollbar) {
+      display: none;
    }
 </style>
