@@ -84,6 +84,49 @@
       }
    }
 
+   // function handleMasterSwitch(isOn) {
+   //    if (!window.p5Instance || isAnimating) return;
+
+   //    console.log(
+   //       `Master switch triggered — ${isOn ? "Vertical U→D" : "Vertical D→U"}`,
+   //    );
+   //    isAnimating = true;
+
+   //    const sequence = [];
+   //    const rows = 4;
+   //    const cols = 4;
+
+   //    if (isOn) {
+   //       // Vertical top → bottom
+   //       for (let i = 0; i < cols; i++) {
+   //          for (let j = 0; j < rows; j++) {
+   //             sequence.push({ row: j, col: i });
+   //          }
+   //       }
+   //    } else {
+   //       // Vertical bottom → top (reverse order)
+   //       for (let i = cols - 1; i >= 0; i--) {
+   //          for (let j = rows - 1; j >= 0; j--) {
+   //             sequence.push({ row: j, col: i });
+   //          }
+   //       }
+   //    }
+
+   //    const totalDuration = sequence.length * 150;
+
+   //    sequence.forEach((item, index) => {
+   //       setTimeout(() => {
+   //          window.p5Instance.triggerAnimation(item.row, item.col, isOn);
+
+   //          if (index === sequence.length - 1) {
+   //             setTimeout(() => {
+   //                isAnimating = false;
+   //             }, 500);
+   //          }
+   //       }, index * 150);
+   //    });
+   // }
+
    function timerForIdling() {
       // 1) choose random time 200-450 sec
       const min = 200;
@@ -158,7 +201,7 @@
    function publishSwitchCommand(row, col, state) {
       const flippedCol = 3 - col; // horizontal mirror
       const switchNum = row * 4 + flippedCol + 1;
-      mqttClient.publish(`switch/${switchNum}`, state ? "ON" : "OFF");
+      client.publish(`switch/${switchNum}`, state ? "ON" : "OFF");
    }
 
    function publishState(row, col, state, note) {
@@ -389,8 +432,6 @@
             const rows = 4;
             const cols = 4;
             const ellipseSize = 100;
-            const xSpacing = canvasSize / (cols + 1);
-            const ySpacing = canvasSize / (rows + 1);
             let ellipseStates = [];
             let midiNotes = [];
 
@@ -402,6 +443,9 @@
                   midiNotes[i][j] = 60;
                }
             }
+
+            const x = xSpacing * (cols - i);
+            const y = ySpacing * (j + 1);
 
             function checkAllOff() {
                for (let i = 0; i < rows; i++) {
@@ -457,7 +501,7 @@
 
                for (let i = 0; i < cols; i++) {
                   for (let j = 0; j < rows; j++) {
-                     const x = xSpacing * (i + 1);
+                     const x = xSpacing * (cols - i);
                      const y = ySpacing * (j + 1);
                      const distance = p.dist(clickedX, clickedY, x, y);
                      ellipsesWithDistance.push({
@@ -701,7 +745,8 @@
             function updateSwitch(row, col, state, midiNote) {
                ellipseStates[row][col] = state;
 
-               publishSwitchCommand(row, col, state);
+               const switchNum = row * cols + col + 1;
+               publishSwitchCommand(switchNum, state);
 
                if (state) {
                   playMIDINote(midiNote, 200);
@@ -779,9 +824,6 @@
                      }
                   }
                },
-               getEllipseStates: () => {
-                  return ellipseStates;
-               },
             };
 
             generateMelody(rows * cols).then((generatedNotes) => {
@@ -804,6 +846,11 @@
 
             p.draw = () => {
                p.background(255);
+
+               // p.fill(0);
+               // p.textSize(20);
+               // p.textAlign(p.LEFT, p.TOP);
+               // p.text(`Pattern: ${currentPattern}`, 20, 20);
 
                p.textAlign(p.CENTER, p.CENTER);
 
@@ -893,7 +940,6 @@
          await initializeMagenta();
          console.log("Magenta model ready");
          loadP5();
-         timerForIdling();
       };
       document.body.appendChild(magentaScript);
    });
@@ -908,6 +954,21 @@
       }
    });
 </script>
+
+<!-- Pattern Selection UI (for debugging) -->
+<!-- <div class="pattern-selector">
+   <div class="pattern-buttons">
+      {#each patterns as pattern}
+         <button
+            class:active={currentPattern === pattern.id}
+            on:click={() => setPattern(pattern.id)}
+            disabled={isAnimating}
+         >
+            {pattern.name}
+         </button>
+      {/each}
+   </div>
+</div> -->
 
 <style>
    :global(html),
@@ -934,5 +995,54 @@
 
    :global(*::-webkit-scrollbar) {
       display: none;
+   }
+
+   .pattern-selector {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      z-index: 1000;
+   }
+
+   .pattern-selector h3 {
+      margin: 0 0 15px 0;
+      font-size: 18px;
+      font-weight: bold;
+   }
+
+   .pattern-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+   }
+
+   .pattern-buttons button {
+      padding: 12px 20px;
+      border: 2px solid #333;
+      background: white;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s;
+   }
+
+   .pattern-buttons button:hover:not(:disabled) {
+      background: #f0f0f0;
+      transform: translateY(-2px);
+   }
+
+   .pattern-buttons button.active {
+      background: #333;
+      color: white;
+   }
+
+   .pattern-buttons button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
    }
 </style>
