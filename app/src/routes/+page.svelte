@@ -99,7 +99,8 @@
 
       sequence.forEach((item, index) => {
          setTimeout(() => {
-            window.p5Instance.triggerAnimation(item.row, item.col, isOn);
+            // Only update visual and play audio - NO physical switches
+            window.p5Instance.updateSwitchVisualOnly(item.row, item.col, isOn);
             if (index === sequence.length - 1) {
                setTimeout(() => {
                   isAnimating = false;
@@ -109,12 +110,23 @@
       });
    }
 
+   // function publishSwitchCommand(row, col, state) {
+   //    const flippedCol = 3 - col;
+   //    const switchNum = row * 4 + flippedCol + 1;
+   //    if (mqttClient?.connected) {
+   //       mqttClient.publish(`switch/${switchNum}`, state ? "ON" : "OFF");
+   //    }
+   // }
+
    function publishSwitchCommand(row, col, state) {
       const flippedCol = 3 - col;
       const switchNum = row * 4 + flippedCol + 1;
+
       if (mqttClient?.connected) {
          mqttClient.publish(`switch/${switchNum}`, state ? "ON" : "OFF");
       }
+
+      console.log(`[${row},${col}] → switch #${switchNum}`); // Debug
    }
 
    function publishState(row, col, state, note) {
@@ -199,6 +211,8 @@
       }
    }
 
+   let synthParams = {};
+
    function setupMainSynth() {
       if (!mainSynth) {
          console.error("mainSynth is null!");
@@ -207,27 +221,43 @@
 
       console.log("\nSETTING UP MAIN SYNTH...");
 
-      const params = {
+      synthParams = {
+         filterCut: mainSynth.parametersById.get("filterCut"),
+         filterQ: mainSynth.parametersById.get("filterQ"),
+         filterType: mainSynth.parametersById.get("filterType"),
+         reverbTime: mainSynth.parametersById.get("reverbTime"),
+         reverbMix: mainSynth.parametersById.get("reverbMix"),
+         setTuning: mainSynth.parametersById.get("setTuning"),
+         attack: mainSynth.parametersById.get("poly/envelope/attack"),
+         decay: mainSynth.parametersById.get("poly/envelope/decay"),
+         sustain: mainSynth.parametersById.get("poly/envelope/sustain"),
+         release: mainSynth.parametersById.get("poly/envelope/release"),
+         oscMode: mainSynth.parametersById.get("poly/oscillator/mode"),
+         leftDelay: mainSynth.parametersById.get("poly/delay/left_delay"),
+         delayFb: mainSynth.parametersById.get("poly/delay/fb"),
+         rightDelay: mainSynth.parametersById.get("poly/delay/right_delay"),
+      };
+
+      const initialValues = {
          filterCut: 1200,
          filterQ: 0.2,
          filterType: 0,
          reverbTime: 10,
-         reverbMix: 0.3,
+         reverbMix: 0.6,
          setTuning: 0,
-         "poly/envelope/attack": 30,
-         "poly/envelope/decay": 150,
-         "poly/envelope/sustain": 0.6,
-         "poly/envelope/release": 800,
-         "poly/oscillator/mode": 1,
-         "poly/delay/left_delay": 250,
-         "poly/delay/fb": 0.15,
-         "poly/delay/right_delay": 350,
+         attack: 30,
+         decay: 150,
+         sustain: 0.6,
+         release: 800,
+         oscMode: 1,
+         leftDelay: 250,
+         delayFb: 0.4,
+         rightDelay: 350,
       };
 
-      Object.entries(params).forEach(([key, value]) => {
-         const param = mainSynth.parametersById.get(key);
-         if (param) {
-            param.value = value;
+      Object.entries(initialValues).forEach(([key, value]) => {
+         if (synthParams[key]) {
+            synthParams[key].value = value;
             console.log(`   ${key} = ${value}`);
          } else {
             console.warn(`   NOT FOUND: ${key}`);
@@ -306,7 +336,7 @@
 
       const midiChannel = 0;
       const midiPort = 0;
-      const velocity = 100;
+      const velocity = 127;
       const currentTime = audioContext.currentTime * 1000;
 
       console.log(
@@ -368,16 +398,43 @@
          const samples = await magentaModel.sample(1, 0.7);
          let notes = samples[0].notes.slice(0, numNotes).map((n) => n.pitch);
 
-         const pentatonic = [
-            48, 50, 52, 55, 57, 60, 62, 64, 67, 69, 72, 74, 76,
-         ];
+         const scales = {
+            pentatonic: [48, 50, 52, 55, 57, 60, 62, 64, 67, 69, 72, 74, 76],
+            major: [
+               48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74,
+               76,
+            ],
+            minor: [
+               48, 50, 51, 53, 55, 56, 58, 60, 62, 63, 65, 67, 68, 70, 72, 74,
+               75,
+            ],
+            blues: [48, 51, 53, 54, 55, 58, 60, 63, 65, 66, 67, 70, 72, 75],
+            dorian: [
+               48, 50, 51, 53, 55, 57, 58, 60, 62, 63, 65, 67, 69, 70, 72, 74,
+            ],
+            phrygian: [
+               48, 49, 51, 53, 55, 56, 58, 60, 61, 63, 65, 67, 68, 70, 72, 73,
+            ],
+            wholetone: [
+               48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76,
+            ],
+            chromatic: [
+               48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+               64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76,
+            ],
+         };
+
+         const scaleNames = Object.keys(scales);
+         const selectedScale =
+            scaleNames[Math.floor(Math.random() * scaleNames.length)];
+         const scale = scales[selectedScale];
 
          notes = notes.map((note) => {
-            return pentatonic.reduce((closest, pNote) => {
-               return Math.abs(pNote - note) < Math.abs(closest - note)
-                  ? pNote
+            return scale.reduce((closest, scaleNote) => {
+               return Math.abs(scaleNote - note) < Math.abs(closest - note)
+                  ? scaleNote
                   : closest;
-            }, pentatonic[0]);
+            }, scale[0]);
          });
 
          return notes;
@@ -387,6 +444,27 @@
             .fill()
             .map(() => Math.floor(Math.random() * 37) + 48);
       }
+   }
+
+   function randomizeParams() {
+      if (!mainSynth) return;
+
+      const mode = Math.floor(Math.random() * 3) + 1;
+      synthParams.oscMode.value = mode;
+      switch (mode) {
+         case 1:
+            synthParams.reverbMix.value = 0.8;
+            synthParams.reverb_decay.value = 0.7;
+            synthParams.delayFb.value = 0.8;
+            break;
+         case 2:
+            synthParams.filterCut = 1300;
+            break;
+         case 3:
+            synthParams.filterCut = 1300;
+            break;
+      }
+      console.log(`Oscillator mode set to: ${mode}`);
    }
 
    async function regenerateMelody() {
@@ -438,7 +516,23 @@
                         midiNotes[i][j] = newNotes[idx++] || 60;
                      }
                   }
+                  randomizeParams();
 
+                  const patternIds = [
+                     "ripple",
+                     "horizontal_lr",
+                     "horizontal_rl",
+                     "vertical_ud",
+                     "vertical_du",
+                     "random",
+                  ];
+                  const randomPattern =
+                     patternIds[Math.floor(Math.random() * patternIds.length)];
+                  currentPattern = randomPattern;
+
+                  if (mqttClient?.connected) {
+                     mqttClient.publish("pattern/set", randomPattern);
+                  }
                   console.log("Notes regenerated");
                   addNoteToDrone();
                }
@@ -447,12 +541,13 @@
             function addNoteToDrone() {
                if (!droneDevice) return;
 
-               // Pure C major chord notes only (C, E, G across octaves)
-               const availableNotes = [
-                  36, 40, 43, 48, 52, 55, 60, 64, 67, 72, 76, 79,
-                  // C2, E2, G2, C3, E3, G3, C4, E4, G4, C5, E5, G5
-               ];
+               // const availableNotes = [
+               //    36, 40, 43, 48, 52, 55, 60, 64, 67, 72, 76, 79,
+               // ];
 
+               const availableNotes = [
+                  36, 40, 43, 48, 52, 55, 59, 60, 64, 67, 71, 74, 76, 79, 83,
+               ];
                const unusedNotes = availableNotes.filter(
                   (note) => !droneNotes.includes(note),
                );
@@ -584,6 +679,23 @@
                );
             }
 
+            // window.p5Instance = {
+            //    triggerAnimation: (row, col, state) => {
+            //       if (row >= 0 && row < rows && col >= 0 && col < cols) {
+            //          triggerAnimation(row, col, state);
+            //       }
+            //    },
+            //    updateNotes: (newNotes) => {
+            //       let idx = 0;
+            //       for (let i = 0; i < rows; i++) {
+            //          for (let j = 0; j < cols; j++) {
+            //             midiNotes[i][j] = newNotes[idx++] || 60;
+            //          }
+            //       }
+            //    },
+            //    getEllipseStates: () => ellipseStates,
+            // };
+
             window.p5Instance = {
                triggerAnimation: (row, col, state) => {
                   if (row >= 0 && row < rows && col >= 0 && col < cols) {
@@ -599,8 +711,16 @@
                   }
                },
                getEllipseStates: () => ellipseStates,
-            };
 
+               updateSwitchVisualOnly: (row, col, state) => {
+                  if (row >= 0 && row < rows && col >= 0 && col < cols) {
+                     ellipseStates[row][col] = state;
+                     if (state) {
+                        playMIDINote(midiNotes[row][col], 500);
+                     }
+                  }
+               },
+            };
             generateMelody(rows * cols).then((generatedNotes) => {
                let noteIndex = 0;
                for (let i = 0; i < rows; i++) {
@@ -630,7 +750,7 @@
                      p.textSize(16);
                      p.text(ellipseStates[j][i] ? "ON" : "OFF", x, y - 8);
                      p.textSize(12);
-                     p.text(`♪${midiNotes[j][i]}`, x, y + 10);
+                     p.text(`${midiNotes[j][i]}`, x, y + 10);
                   }
                }
             };
@@ -724,8 +844,13 @@
 </script>
 
 <style>
+   @font-face {
+      font-family: "Cardinal";
+      src: url("../css/fonts/Cardinal.ttf");
+   }
    :global(html),
    :global(body) {
+      font-family: Cardinal;
       margin: 0;
       padding: 0;
       overflow: hidden;
@@ -734,6 +859,7 @@
    }
 
    :global(body) {
+      font-family: Cardinal;
       display: flex;
       flex-direction: column;
       justify-content: center;
