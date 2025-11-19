@@ -276,13 +276,13 @@
       console.log("\nSETTING UP DRONE...");
 
       const droneParams = {
-         volume: 0.8, // Increased for better presence
+         volume: 0.5, // Increased for better presence
          droneOn: 1,
          droneFilterType: 0, // Lowpass
          droneFilterCut: 800, // Warmer, darker (was 1200)
          droneFilterQ: 0.3, // Gentler resonance (was 0.7)
          harmonics: 1.5, // Simple, pure (was 5.0 - too complex/eerie)
-         overblow: 0.4, // Minimal distortion (was 0.8 - too harsh)
+         overblow: 0, // Minimal distortion (was 0.8 - too harsh)
          fluctuate: 0.005, // Very stable (was 0.01)
          reverbMix: 0.6, // Moderate reverb (was 0.8)
          reverb_decay: 8, // Longer, smoother tail
@@ -456,12 +456,17 @@
             synthParams.reverbMix.value = 0.8;
             synthParams.reverb_decay.value = 0.7;
             synthParams.delayFb.value = 0.8;
+            synthParams.reverbTime.value = 17;
             break;
          case 2:
             synthParams.filterCut = 1300;
+            synthParams.reverbMix.value = 0.2;
+            synthParams.filterCut.value = 500;
             break;
          case 3:
             synthParams.filterCut = 1300;
+            synthParams.filterCut.value = 500;
+            droneParams.harmonics.value = 3;
             break;
       }
       console.log(`Oscillator mode set to: ${mode}`);
