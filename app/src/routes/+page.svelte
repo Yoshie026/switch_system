@@ -7,11 +7,21 @@
    let audioContext = null;
    let magentaModel = null;
    let mqttClient = null;
-   let currentPattern = "ripple";
+   let currentPattern = [
+      "ripple",
+      "horizontal_lr",
+      "horizontal_rl",
+      "vertical_ud",
+      "vertical_du",
+      "random",
+   ][Math.floor(Math.random() * 6)];
    let isAnimating = false;
    let animationTimeout = null;
 
-   let droneNotes = [48, 52, 55, 60, 64, 67]; // Pure C major chord
+   let droneNotes = [48, 52, 55, 60, 64, 67];
+   // let droneNotes = [
+   //    36, 40, 43, 48, 52, 55, 59, 60, 64, 67, 71, 74, 76, 79, 83,
+   // ];
    let droneActive = false;
 
    const patterns = [
@@ -72,11 +82,13 @@
       const flippedCol = 3 - col;
       if (window.p5Instance && !isAnimating) {
          window.p5Instance.triggerAnimation(row, flippedCol, state);
+         resetIdleTimer(); // Add this line
       }
    }
 
    function handleMasterSwitch(isOn) {
       if (!window.p5Instance || isAnimating) return;
+      resetIdleTimer();
       isAnimating = true;
 
       const sequence = [];
@@ -106,7 +118,7 @@
                   isAnimating = false;
                }, 500);
             }
-         }, index * 150);
+         }, index * animSpeed);
       });
    }
 
@@ -146,7 +158,7 @@
       const droneGain = audioContext.createGain();
       const masterGain = audioContext.createGain();
 
-      mainGain.gain.value = 0.8;
+      mainGain.gain.value = 0.9;
       droneGain.gain.value = 0.1;
       masterGain.gain.value = 1.0;
 
@@ -267,6 +279,8 @@
       console.log("Main synth setup complete");
    }
 
+   let droneParams = {};
+
    function setupDrone() {
       if (!droneDevice) {
          console.error("droneDevice is null!");
@@ -275,22 +289,36 @@
 
       console.log("\nSETTING UP DRONE...");
 
-      const droneParams = {
-         volume: 0.5, // Increased for better presence
-         droneOn: 1,
-         droneFilterType: 0, // Lowpass
-         droneFilterCut: 800, // Warmer, darker (was 1200)
-         droneFilterQ: 0.3, // Gentler resonance (was 0.7)
-         harmonics: 1.5, // Simple, pure (was 5.0 - too complex/eerie)
-         overblow: 0, // Minimal distortion (was 0.8 - too harsh)
-         fluctuate: 0.005, // Very stable (was 0.01)
-         reverbMix: 0.6, // Moderate reverb (was 0.8)
-         reverb_decay: 8, // Longer, smoother tail
-         reverb_rotate: 0.3, // Less swirling (was 0.8 - disorienting)
-         damping: 0.75, // High damping removes harsh highs (was 0.4)
+      droneParams = {
+         volume: droneDevice.parametersById.get("volume"),
+         droneOn: droneDevice.parametersById.get("droneOn"),
+         droneFilterType: droneDevice.parametersById.get("droneFilterType"),
+         droneFilterCut: droneDevice.parametersById.get("droneFilterCut"),
+         droneFilterQ: droneDevice.parametersById.get("droneFilterQ"),
+         harmonics: droneDevice.parametersById.get("harmonics"),
+         overblow: droneDevice.parametersById.get("overblow"),
+         fluctuate: droneDevice.parametersById.get("fluctuate"),
+         reverbMix: droneDevice.parametersById.get("reverbMix"),
+         reverb_decay: droneDevice.parametersById.get("reverb_decay"),
+         reverb_rotate: droneDevice.parametersById.get("reverb_rotate"),
+         damping: droneDevice.parametersById.get("damping"),
       };
 
-      Object.entries(droneParams).forEach(([key, value]) => {
+      const initialValues = {
+         volume: 0.5,
+         droneOn: 1,
+         droneFilterType: 0,
+         droneFilterCut: 800,
+         droneFilterQ: 0.3,
+         harmonics: 1.5,
+         overblow: 0,
+         fluctuate: 0.005,
+         reverb_decay: 8,
+         reverb_rotate: 0.3,
+         damping: 0.75,
+      };
+
+      Object.entries(initialValues).forEach(([key, value]) => {
          const param = droneDevice.parametersById.get(key);
          if (param) {
             param.value = value;
@@ -454,20 +482,45 @@
       switch (mode) {
          case 1:
             synthParams.reverbMix.value = 0.8;
-            synthParams.reverb_decay.value = 0.7;
+            //synthParams.reverb_decay.value = 2;
+            synthParams.attack.value = 50;
             synthParams.delayFb.value = 0.8;
             synthParams.reverbTime.value = 17;
+            //droneParams.harmonics.value = 3;
+            //droneParams.volume.value = 0.5;
+
             break;
          case 2:
-            synthParams.filterCut = 1300;
+            synthParams.filterCut.value = 1300;
+            synthParams.attack.value = 0;
+            synthParams.release.value = 300;
             synthParams.reverbMix.value = 0.2;
             synthParams.filterCut.value = 500;
+            // droneParams.volume.value = 0.3;
+
             break;
          case 3:
-            synthParams.filterCut = 1300;
+            synthParams.filterCut.value = 1300;
             synthParams.filterCut.value = 500;
-            droneParams.harmonics.value = 3;
+            synthParams.attack.value = 0;
+            synthParams.release.value = 300;
+            droneParams.harmonics.value = 4;
+            droneParams.overblow.value = 2;
+            droneParams.damping.value = 0.5;
+            //droneParams.filterCut.value = 1200;
+            //droneParams.volume.value = 0.3;
             break;
+         // case 4:
+         //    synthParams.filterCut.value = 1300;
+         //    synthParams.filterCut.value = 500;
+         //    synthParams.attack.value = 0;
+         //    synthParams.release.value = 300;
+         //    droneParams.harmonics.value = 3;
+         //    droneParams.overblow.value = 0.5;
+         //    droneParams.damping.value = 0.5;
+         //    droneParams.filterCut.value = 1200;
+         //    droneParams.volume.value = 0.3;
+         //    break;
       }
       console.log(`Oscillator mode set to: ${mode}`);
    }
@@ -522,7 +575,9 @@
                      }
                   }
                   randomizeParams();
+                  animSpeed = Math.floor(Math.random() * (650 - 250 + 1)) + 250;
 
+                  // Pattern randomization - exclude current pattern
                   const patternIds = [
                      "ripple",
                      "horizontal_lr",
@@ -531,14 +586,20 @@
                      "vertical_du",
                      "random",
                   ];
+                  const availablePatterns = patternIds.filter(
+                     (p) => p !== currentPattern,
+                  );
+
                   const randomPattern =
-                     patternIds[Math.floor(Math.random() * patternIds.length)];
+                     availablePatterns[
+                        Math.floor(Math.random() * availablePatterns.length)
+                     ];
                   currentPattern = randomPattern;
 
                   if (mqttClient?.connected) {
                      mqttClient.publish("pattern/set", randomPattern);
                   }
-                  console.log("Notes regenerated");
+                  console.log(`Pattern selected: ${randomPattern}`); // Better logging
                   addNoteToDrone();
                }
             }
@@ -614,6 +675,7 @@
                );
             }
 
+            let animSpeed = 300;
             function ripplePattern(clickedRow, clickedCol, newState) {
                const clickedX = xSpacing * (clickedCol + 1);
                const clickedY = ySpacing * (clickedRow + 1);
@@ -649,10 +711,219 @@
                            regenerateNotes();
                         }, 500);
                      }
-                  }, index * 300);
+                  }, index * animSpeed);
                });
 
                return ellipsesWithDistance.length * 300 + 500;
+            }
+
+            function horizontalLRPattern(clickedRow, clickedCol, newState) {
+               let sequence = [];
+
+               // Start with clicked row, go right from clicked column
+               for (let offsetCol = 0; offsetCol < cols; offsetCol++) {
+                  const col = (clickedCol + offsetCol) % cols;
+                  sequence.push({
+                     row: clickedRow,
+                     col: col,
+                     midiNote: midiNotes[clickedRow][col],
+                  });
+               }
+
+               // Then do other rows, left to right
+               for (let j = 0; j < rows; j++) {
+                  if (j === clickedRow) continue; // Skip clicked row (already done)
+
+                  for (let i = 0; i < cols; i++) {
+                     sequence.push({
+                        row: j,
+                        col: i,
+                        midiNote: midiNotes[j][i],
+                     });
+                  }
+               }
+
+               sequence.forEach((item, index) => {
+                  setTimeout(() => {
+                     updateSwitch(item.row, item.col, newState, item.midiNote);
+                     if (index === sequence.length - 1) {
+                        setTimeout(() => {
+                           isAnimating = false;
+                           regenerateNotes();
+                        }, 500);
+                     }
+                  }, index * animSpeed);
+               });
+
+               return sequence.length * 150 + 500;
+            }
+
+            function horizontalRLPattern(clickedRow, clickedCol, newState) {
+               let sequence = [];
+
+               // Start with clicked row, go left from clicked column
+               for (let offsetCol = 0; offsetCol < cols; offsetCol++) {
+                  const col = (clickedCol - offsetCol + cols) % cols;
+                  sequence.push({
+                     row: clickedRow,
+                     col: col,
+                     midiNote: midiNotes[clickedRow][col],
+                  });
+               }
+
+               // Then do other rows, right to left
+               for (let j = 0; j < rows; j++) {
+                  if (j === clickedRow) continue;
+
+                  for (let i = cols - 1; i >= 0; i--) {
+                     sequence.push({
+                        row: j,
+                        col: i,
+                        midiNote: midiNotes[j][i],
+                     });
+                  }
+               }
+
+               sequence.forEach((item, index) => {
+                  setTimeout(() => {
+                     updateSwitch(item.row, item.col, newState, item.midiNote);
+                     if (index === sequence.length - 1) {
+                        setTimeout(() => {
+                           isAnimating = false;
+                           regenerateNotes();
+                        }, 500);
+                     }
+                  }, index * animSpeed);
+               });
+
+               return sequence.length * 150 + 500;
+            }
+
+            function verticalUDPattern(clickedRow, clickedCol, newState) {
+               let sequence = [];
+
+               // Start with clicked column, go down from clicked row
+               for (let offsetRow = 0; offsetRow < rows; offsetRow++) {
+                  const row = (clickedRow + offsetRow) % rows;
+                  sequence.push({
+                     row: row,
+                     col: clickedCol,
+                     midiNote: midiNotes[row][clickedCol],
+                  });
+               }
+
+               // Then do other columns, top to bottom
+               for (let i = 0; i < cols; i++) {
+                  if (i === clickedCol) continue;
+
+                  for (let j = 0; j < rows; j++) {
+                     sequence.push({
+                        row: j,
+                        col: i,
+                        midiNote: midiNotes[j][i],
+                     });
+                  }
+               }
+
+               sequence.forEach((item, index) => {
+                  setTimeout(() => {
+                     updateSwitch(item.row, item.col, newState, item.midiNote);
+                     if (index === sequence.length - 1) {
+                        setTimeout(() => {
+                           isAnimating = false;
+                           regenerateNotes();
+                        }, 500);
+                     }
+                  }, index * animSpeed);
+               });
+
+               return sequence.length * 150 + 500;
+            }
+
+            function verticalDUPattern(clickedRow, clickedCol, newState) {
+               let sequence = [];
+
+               // Start with clicked column, go up from clicked row
+               for (let offsetRow = 0; offsetRow < rows; offsetRow++) {
+                  const row = (clickedRow - offsetRow + rows) % rows;
+                  sequence.push({
+                     row: row,
+                     col: clickedCol,
+                     midiNote: midiNotes[row][clickedCol],
+                  });
+               }
+
+               // Then do other columns, bottom to top
+               for (let i = 0; i < cols; i++) {
+                  if (i === clickedCol) continue;
+
+                  for (let j = rows - 1; j >= 0; j--) {
+                     sequence.push({
+                        row: j,
+                        col: i,
+                        midiNote: midiNotes[j][i],
+                     });
+                  }
+               }
+
+               sequence.forEach((item, index) => {
+                  setTimeout(() => {
+                     updateSwitch(item.row, item.col, newState, item.midiNote);
+                     if (index === sequence.length - 1) {
+                        setTimeout(() => {
+                           isAnimating = false;
+                           regenerateNotes();
+                        }, 500);
+                     }
+                  }, index * animSpeed);
+               });
+
+               return sequence.length * 150 + 500;
+            }
+
+            function randomPattern(clickedRow, clickedCol, newState) {
+               let sequence = [];
+
+               // Add clicked ellipse FIRST
+               sequence.push({
+                  row: clickedRow,
+                  col: clickedCol,
+                  midiNote: midiNotes[clickedRow][clickedCol],
+               });
+
+               // Create array of all OTHER positions
+               for (let i = 0; i < cols; i++) {
+                  for (let j = 0; j < rows; j++) {
+                     // Skip the clicked one since we already added it
+                     if (j === clickedRow && i === clickedCol) continue;
+
+                     sequence.push({
+                        row: j,
+                        col: i,
+                        midiNote: midiNotes[j][i],
+                     });
+                  }
+               }
+
+               // Shuffle only the remaining elements (not the first one)
+               for (let i = sequence.length - 1; i > 1; i--) {
+                  const j = Math.floor(Math.random() * (i - 1)) + 1; // Start from index 1
+                  [sequence[i], sequence[j]] = [sequence[j], sequence[i]];
+               }
+
+               sequence.forEach((item, index) => {
+                  setTimeout(() => {
+                     updateSwitch(item.row, item.col, newState, item.midiNote);
+                     if (index === sequence.length - 1) {
+                        setTimeout(() => {
+                           isAnimating = false;
+                           regenerateNotes();
+                        }, 500);
+                     }
+                  }, index * animSpeed);
+               });
+
+               return sequence.length * 150 + 500;
             }
 
             function updateSwitch(row, col, state, midiNote) {
@@ -671,9 +942,30 @@
                if (isAnimating) {
                   return;
                }
-
                isAnimating = true;
-               const duration = ripplePattern(row, col, newState);
+
+               let duration;
+               switch (currentPattern) {
+                  case "horizontal_lr":
+                     duration = horizontalLRPattern(row, col, newState);
+                     break;
+                  case "horizontal_rl":
+                     duration = horizontalRLPattern(row, col, newState);
+                     break;
+                  case "vertical_ud":
+                     duration = verticalUDPattern(row, col, newState);
+                     break;
+                  case "vertical_du":
+                     duration = verticalDUPattern(row, col, newState);
+                     break;
+                  case "random":
+                     duration = randomPattern(row, col, newState);
+                     break;
+                  case "ripple":
+                  default:
+                     duration = ripplePattern(row, col, newState);
+                     break;
+               }
 
                if (animationTimeout) clearTimeout(animationTimeout);
                animationTimeout = setTimeout(
@@ -700,6 +992,7 @@
             //    },
             //    getEllipseStates: () => ellipseStates,
             // };
+            const fontPath = "/fonts/Cardinal.ttf";
 
             window.p5Instance = {
                triggerAnimation: (row, col, state) => {
@@ -736,26 +1029,42 @@
                }
             });
 
+            let p5Font;
+            p.preload = () => {
+               p5Font = p.loadFont(fontPath);
+            };
+
             p.setup = () => {
                p.createCanvas(canvasSize, canvasSize);
                p.background(255);
                p.textAlign(p.CENTER, p.CENTER);
+               p.textFont(p5Font);
+               p.noSmooth();
             };
 
             p.draw = () => {
-               p.background(255);
+               //p.background(255);
+
                for (let i = 0; i < cols; i++) {
                   for (let j = 0; j < rows; j++) {
                      const x = xSpacing * (i + 1);
                      const y = ySpacing * (j + 1);
+
+                     // p.rect(
+                     //    xSpacing - x,
+                     //    ySpacing - y,
+                     //    innerWidth,
+                     //    innerHeight,
+                     // );
                      p.fill(ellipseStates[j][i] ? 0 : 255);
                      p.stroke(0);
+                     p.strokeWeight(1.4);
                      p.ellipse(x, y, ellipseSize, ellipseSize);
                      p.fill(ellipseStates[j][i] ? 255 : 0);
-                     p.textSize(16);
-                     p.text(ellipseStates[j][i] ? "ON" : "OFF", x, y - 8);
+                     p.textSize(50);
+                     p.text(ellipseStates[j][i] ? "Off" : "On", x, y - 5);
                      p.textSize(12);
-                     p.text(`${midiNotes[j][i]}`, x, y + 10);
+                     //p.text(`${midiNotes[j][i]}`, x, y + 20);
                   }
                }
             };
@@ -766,6 +1075,7 @@
                      console.log("Audio context resumed");
                   });
                }
+               resetIdleTimer(); // Add this line
 
                if (isAnimating) return;
 
@@ -776,6 +1086,7 @@
                      const distance = p.dist(p.mouseX, p.mouseY, x, y);
                      if (distance < ellipseSize / 2) {
                         triggerAnimation(j, i, !ellipseStates[j][i]);
+                        //p.background(ellipseStates[j][i] ? 0 : 255);
                         return;
                      }
                   }
@@ -812,10 +1123,49 @@
       document.body.appendChild(script);
    }
 
+   let lastInteractionTime = Date.now();
+   let idleCheckInterval = null;
+   const IDLE_TIMEOUT = Math.floor(Math.random() * 5 + 1) * 60 * 1000;
+   function startIdleChecker() {
+      // Clear any existing interval
+      if (idleCheckInterval) {
+         clearInterval(idleCheckInterval);
+      }
+
+      // Check every 30 seconds if we've been idle
+      idleCheckInterval = setInterval(() => {
+         const timeSinceLastInteraction = Date.now() - lastInteractionTime;
+
+         if (timeSinceLastInteraction >= IDLE_TIMEOUT && !isAnimating) {
+            console.log("IDLE: Triggering random animation");
+            triggerRandomIdleAnimation();
+         }
+      }, 30000); // Check every 30 seconds
+   }
+
+   function triggerRandomIdleAnimation() {
+      if (!window.p5Instance || isAnimating) return;
+
+      const randomRow = Math.floor(Math.random() * 4);
+      const randomCol = Math.floor(Math.random() * 4);
+
+      const states = window.p5Instance.getEllipseStates();
+      const currentState = states[randomRow][randomCol];
+
+      window.p5Instance.triggerAnimation(randomRow, randomCol, !currentState);
+
+      lastInteractionTime = Date.now();
+   }
+
+   function resetIdleTimer() {
+      lastInteractionTime = Date.now();
+   }
+
    onMount(() => {
       console.log("\nSTARTING...\n");
       setupRNBO();
       setupMQTT();
+      startIdleChecker();
 
       const magentaScript = document.createElement("script");
       magentaScript.src = "/lib/magenta.js";
@@ -845,17 +1195,15 @@
       if (animationTimeout) {
          clearTimeout(animationTimeout);
       }
+      if (idleCheckInterval) {
+         clearInterval(idleCheckInterval); // Add this
+      }
    });
 </script>
 
 <style>
-   @font-face {
-      font-family: "Cardinal";
-      src: url("../css/fonts/Cardinal.ttf");
-   }
    :global(html),
    :global(body) {
-      font-family: Cardinal;
       margin: 0;
       padding: 0;
       overflow: hidden;
@@ -864,7 +1212,6 @@
    }
 
    :global(body) {
-      font-family: Cardinal;
       display: flex;
       flex-direction: column;
       justify-content: center;
