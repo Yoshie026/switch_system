@@ -305,7 +305,7 @@
       };
 
       const initialValues = {
-         volume: 0.5,
+         volume: 0.3,
          droneOn: 1,
          droneFilterType: 0,
          droneFilterCut: 800,
@@ -1070,14 +1070,14 @@
             };
 
             p.mousePressed = () => {
+               if (isAnimating) return;
+
                if (audioContext?.state === "suspended") {
                   audioContext.resume().then(() => {
                      console.log("Audio context resumed");
                   });
                }
                resetIdleTimer(); // Add this line
-
-               if (isAnimating) return;
 
                for (let i = 0; i < cols; i++) {
                   for (let j = 0; j < rows; j++) {
@@ -1086,7 +1086,7 @@
                      const distance = p.dist(p.mouseX, p.mouseY, x, y);
                      if (distance < ellipseSize / 2) {
                         triggerAnimation(j, i, !ellipseStates[j][i]);
-                        //p.background(ellipseStates[j][i] ? 0 : 255);
+                        p.background(ellipseStates[j][i] ? 0 : 255);
                         return;
                      }
                   }
