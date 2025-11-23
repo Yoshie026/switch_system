@@ -310,7 +310,7 @@
          droneFilterType: 0,
          droneFilterCut: 800,
          droneFilterQ: 0.3,
-         harmonics: 1.5,
+         harmonics: 0.6,
          overblow: 0,
          fluctuate: 0.005,
          reverb_decay: 8,
@@ -487,7 +487,7 @@
             synthParams.reverbTime.value = 10;
             synthParams.reverb_rotate.value = 0.6;
             droneParams.harmonics.value =
-               Math.floor(Math.random() * (4 + 1)) + 1;
+               Math.floor(Math.random() * (2 + 1)) + 1;
             droneParams.droneFilterQ.value = 1;
             //droneParams.harmonics.value = 3;
             //droneParams.volume.value = 0.5;
@@ -510,7 +510,7 @@
             synthParams.release.value = 300;
             synthParams.reverb_rotate.value = 0.2;
             droneParams.harmonics.value =
-               Math.floor(Math.random() * (4 + 1)) + 1;
+               Math.floor(Math.random() * (2 + 1)) + 1;
             droneParams.overblow.value =
                Math.floor(Math.random() * (2 + 1)) + 1;
             droneParams.damping.value = 0.5;
