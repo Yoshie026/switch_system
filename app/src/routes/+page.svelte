@@ -256,14 +256,14 @@
          filterType: 0,
          reverbTime: 10,
          reverbMix: 0.6,
-         setTuning: 0,
+         setTuning: 1,
          attack: 30,
          decay: 150,
          sustain: 0.6,
          release: 800,
          oscMode: 1,
          leftDelay: 250,
-         delayFb: 0.4,
+         delayFb: 0.8,
          rightDelay: 350,
       };
 
@@ -332,7 +332,7 @@
       const velocity = 50;
       const currentTime = droneDevice.context.currentTime * 1000;
 
-      console.log("\nStarting drone: C major chord (C3, E3, G3, C4, E4, G4)");
+      // console.log("\nStarting drone: C major chord (C3, E3, G3, C4, E4, G4)");
       console.log("Notes: " + droneNotes.join(", "));
 
       droneNotes.forEach((note) => {
@@ -482,13 +482,15 @@
       switch (mode) {
          case 1:
             synthParams.reverbMix.value = 0.8;
-            //synthParams.reverb_decay.value = 2;
             synthParams.attack.value = 50;
-            synthParams.delayFb.value = 0.8;
-            synthParams.reverbTime.value = 17;
+            synthParams.delayFb.value = 1.3;
+            synthParams.reverbTime.value = 10;
+            synthParams.reverb_rotate.value = 0.6;
+            droneParams.harmonics.value =
+               Math.floor(Math.random() * (4 + 1)) + 1;
+            droneParams.droneFilterQ.value = 1;
             //droneParams.harmonics.value = 3;
             //droneParams.volume.value = 0.5;
-
             break;
          case 2:
             synthParams.filterCut.value = 1300;
@@ -496,31 +498,26 @@
             synthParams.release.value = 300;
             synthParams.reverbMix.value = 0.2;
             synthParams.filterCut.value = 500;
+            synthParams.reverb_rotate.value = 0.2;
+
             // droneParams.volume.value = 0.3;
 
             break;
          case 3:
-            synthParams.filterCut.value = 1300;
+            synthParams.filterCut.value = 1000;
             synthParams.filterCut.value = 500;
             synthParams.attack.value = 0;
             synthParams.release.value = 300;
-            droneParams.harmonics.value = 4;
-            droneParams.overblow.value = 2;
+            synthParams.reverb_rotate.value = 0.2;
+            droneParams.harmonics.value =
+               Math.floor(Math.random() * (4 + 1)) + 1;
+            droneParams.overblow.value =
+               Math.floor(Math.random() * (2 + 1)) + 1;
             droneParams.damping.value = 0.5;
+            synthParams.reverb_rotate.value = 0.2;
             //droneParams.filterCut.value = 1200;
             //droneParams.volume.value = 0.3;
             break;
-         // case 4:
-         //    synthParams.filterCut.value = 1300;
-         //    synthParams.filterCut.value = 500;
-         //    synthParams.attack.value = 0;
-         //    synthParams.release.value = 300;
-         //    droneParams.harmonics.value = 3;
-         //    droneParams.overblow.value = 0.5;
-         //    droneParams.damping.value = 0.5;
-         //    droneParams.filterCut.value = 1200;
-         //    droneParams.volume.value = 0.3;
-         //    break;
       }
       console.log(`Oscillator mode set to: ${mode}`);
    }
