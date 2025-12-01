@@ -257,13 +257,13 @@
          reverbTime: 10,
          reverbMix: 0.6,
          setTuning: 1,
-         attack: 30,
+         attack: 10,
          decay: 150,
          sustain: 0.6,
          release: 800,
          oscMode: 1,
          leftDelay: 250,
-         delayFb: 0.8,
+         delayFb: 0.5,
          rightDelay: 350,
       };
 
@@ -305,7 +305,7 @@
       };
 
       const initialValues = {
-         volume: 3,
+         volume: 1,
          droneOn: 1,
          droneFilterType: 0,
          droneFilterCut: 800,
@@ -486,9 +486,9 @@
             synthParams.delayFb.value = 1.3;
             synthParams.reverbTime.value = 10;
             synthParams.reverb_rotate.value = 0.6;
-            droneParams.harmonics.value =
-               Math.floor(Math.random() * (2 + 1)) + 1;
-            droneParams.droneFilterQ.value = 1;
+            // droneParams.harmonics.value =
+            //    Math.floor(Math.random() * (2 + 1)) + 1;
+            // droneParams.droneFilterQ.value = 1;
             //droneParams.harmonics.value = 3;
             //droneParams.volume.value = 0.5;
             break;
@@ -509,12 +509,12 @@
             synthParams.attack.value = 0;
             synthParams.release.value = 300;
             synthParams.reverb_rotate.value = 0.2;
-            droneParams.harmonics.value =
-               Math.floor(Math.random() * (2 + 1)) + 1;
-            droneParams.overblow.value =
-               Math.floor(Math.random() * (2 + 1)) + 1;
-            droneParams.damping.value = 0.5;
-            synthParams.reverb_rotate.value = 0.2;
+            // droneParams.harmonics.value =
+            //    Math.floor(Math.random() * (2 + 1)) + 1;
+            // droneParams.overblow.value =
+            //    Math.floor(Math.random() * (2 + 1)) + 1;
+            // droneParams.damping.value = 0.5;
+            // synthParams.reverb_rotate.value = 0.2;
             //droneParams.filterCut.value = 1200;
             //droneParams.volume.value = 0.3;
             break;
