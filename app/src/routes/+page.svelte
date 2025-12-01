@@ -305,7 +305,7 @@
       };
 
       const initialValues = {
-         volume: 1,
+         volume: 3,
          droneOn: 1,
          droneFilterType: 0,
          droneFilterCut: 800,
