@@ -256,7 +256,7 @@
          filterType: 0,
          reverbTime: 10,
          reverbMix: 0.6,
-         setTuning: 1,
+         setTuning: 3,
          attack: 10,
          decay: 150,
          sustain: 0.6,
