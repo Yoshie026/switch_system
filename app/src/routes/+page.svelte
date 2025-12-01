@@ -312,10 +312,10 @@
          droneFilterQ: 0.3,
          harmonics: 0.6,
          overblow: 0,
-         fluctuate: 0.005,
+         fluctuate: 0.001,
          reverb_decay: 8,
          reverb_rotate: 0.3,
-         damping: 0.75,
+         damping: 0.2,
       };
 
       Object.entries(initialValues).forEach(([key, value]) => {
@@ -484,7 +484,7 @@
             synthParams.reverbMix.value = 0.8;
             synthParams.attack.value = 50;
             synthParams.delayFb.value = 1.3;
-            synthParams.reverbTime.value = 10;
+            synthParams.reverbTime.value = 3;
             synthParams.reverb_rotate.value = 0.6;
             // droneParams.harmonics.value =
             //    Math.floor(Math.random() * (2 + 1)) + 1;
