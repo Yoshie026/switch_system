@@ -154,6 +154,29 @@
       const WAContext = window.AudioContext || window.webkitAudioContext;
       audioContext = new WAContext();
 
+      audioContext.addEventListener("statechange", () => {
+         console.log(`AudioContext state: ${audioContext.state}`);
+         if (audioContext.state === "suspended") {
+            console.warn("Audio suspended! Resuming...");
+            audioContext.resume();
+         }
+      });
+
+      setInterval(() => {
+         if (audioContext && audioContext.state === "suspended") {
+            console.log("Keepalive: resuming audio");
+            audioContext.resume();
+         }
+      }, 1000);
+
+      const silenceNode = audioContext.createConstantSource();
+      const silenceGain = audioContext.createGain();
+      silenceGain.gain.value = 0.0001; // Nearly silent
+      silenceNode.connect(silenceGain);
+      silenceGain.connect(audioContext.destination);
+      silenceNode.start();
+      console.log("Silence node started (keepalive)");
+
       const mainGain = audioContext.createGain();
       const droneGain = audioContext.createGain();
       const masterGain = audioContext.createGain();
@@ -329,7 +352,7 @@
       });
 
       const midiPort = 0;
-      const velocity = 50;
+      const velocity = 80;
       const currentTime = droneDevice.context.currentTime * 1000;
 
       // console.log("\nStarting drone: C major chord (C3, E3, G3, C4, E4, G4)");
