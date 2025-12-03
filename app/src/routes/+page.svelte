@@ -154,28 +154,33 @@
       const WAContext = window.AudioContext || window.webkitAudioContext;
       audioContext = new WAContext();
 
+      //  AUDIO KEEPALIVE SYSTEM - PREVENTS 3-SECOND CUTOUT
       audioContext.addEventListener("statechange", () => {
-         console.log(`AudioContext state: ${audioContext.state}`);
+         console.log(
+            ` AudioContext: ${audioContext.state} @ ${audioContext.currentTime.toFixed(2)}s`,
+         );
          if (audioContext.state === "suspended") {
-            console.warn("Audio suspended! Resuming...");
+            console.warn("⚠️ Audio suspended! Resuming...");
             audioContext.resume();
          }
       });
 
+      // Check every second and force resume if needed
       setInterval(() => {
-         if (audioContext && audioContext.state === "suspended") {
-            console.log("Keepalive: resuming audio");
+         if (audioContext?.state === "suspended") {
+            console.log(" Keepalive: resuming audio");
             audioContext.resume();
          }
       }, 1000);
 
+      // Silent audio stream to keep context alive
       const silenceNode = audioContext.createConstantSource();
       const silenceGain = audioContext.createGain();
       silenceGain.gain.value = 0.0001; // Nearly silent
       silenceNode.connect(silenceGain);
       silenceGain.connect(audioContext.destination);
       silenceNode.start();
-      console.log("Silence node started (keepalive)");
+      console.log(" Silence keepalive started");
 
       const mainGain = audioContext.createGain();
       const droneGain = audioContext.createGain();
@@ -352,7 +357,7 @@
       });
 
       const midiPort = 0;
-      const velocity = 80;
+      const velocity = 90;
       const currentTime = droneDevice.context.currentTime * 1000;
 
       // console.log("\nStarting drone: C major chord (C3, E3, G3, C4, E4, G4)");
